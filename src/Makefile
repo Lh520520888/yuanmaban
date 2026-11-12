@@ -98,6 +98,8 @@ endif
 OPENsrc_CFLAGS = -fobjc-arc -O2 \
 	-Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter \
 	-Wno-deprecated-declarations -Wno-pointer-sign -Wno-int-conversion \
+	-Wno-error=format \
+	-Wno-error=format-extra-args \
 	-Wno-error=unused-but-set-variable \
 	-Wno-error=incompatible-pointer-types \
 	-Wno-error=implicit-function-declaration \
