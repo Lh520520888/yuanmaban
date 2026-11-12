@@ -98,6 +98,10 @@ endif
 OPENsrc_CFLAGS = -fobjc-arc -O2 \
 	-Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter \
 	-Wno-deprecated-declarations -Wno-pointer-sign -Wno-int-conversion \
+	-Wno-error=unused-but-set-variable \
+	-Wno-error=incompatible-pointer-types \
+	-Wno-error=implicit-function-declaration \
+	-Wno-error=nullability-completeness \
 	-I$(CURDIR)/Headers \
 	-I/opt/homebrew/opt/libarchive/include \
 	-I/usr/local/opt/libarchive/include \
