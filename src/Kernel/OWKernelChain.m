@@ -523,7 +523,8 @@ static void *ow_xpf_sym(const char *name) {
 
     const char *sets[] = {"translation", "trustcache", "sandbox", "physmap",
                           "struct", "physrw", "IOSurface", NULL};
-    xpc_object_t dict = (xpc_object_t)xpf_construct((const char **)sets);
+    // ARC 下 xpc_object_t 是 ObjC 指针，C 指针必须显式 __bridge 转换
+    xpc_object_t dict = (__bridge xpc_object_t)xpf_construct((const char **)sets);
     _offsetsResolved = dict != NULL;
 
     if (!_offsetsResolved) {
