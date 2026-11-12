@@ -1,22 +1,22 @@
 # =============================================================================
 #  src/deps/Makefile
-#  把上游 C 依赖编译成 iOS 静态库，供主工程链接
+#  ??? C ????? iOS ???,??????
 #
-#    用法（macOS + Xcode）：
-#      cd src/deps && make            # 全量
-#      cd src/deps && make xpf        # 只编 XPF
+#    ??(macOS + Xcode):
+#      cd src/deps && make            # ??
+#      cd src/deps && make xpf        # ?? XPF
 #      cd src/deps && make clean
 #
-#  为什么编成静态库而不是 dylib：
-#    这些符号（xpf_* / grab_kernelcache / choma_*）在主可执行里被 dlsym 或
-#    直接引用，静态链进去后符号一定存在，不依赖 @rpath 与依赖拷贝顺序。
+#  ??????????? dylib:
+#    ????(xpf_* / grab_kernelcache / choma_*)??????? dlsym ?
+#    ????,????????????,??? @rpath ????????
 # =============================================================================
 
 UPSTREAM   := $(CURDIR)/../..
-CHOMA      := $(UPSTREAM)/01-越狱内核/ChOma
-XPF        := $(UPSTREAM)/01-越狱内核/XPF
+CHOMA      := $(UPSTREAM)/upstream/ChOma
+XPF        := $(UPSTREAM)/upstream/XPF
 IMG4       := $(XPF)/external/img4lib
-GRAB       := $(UPSTREAM)/05-工具链/libgrabkernel2
+GRAB       := $(UPSTREAM)/upstream/libgrabkernel2
 
 SDK        := $(shell xcrun --sdk iphoneos --show-sdk-path)
 CC         := xcrun -sdk iphoneos clang
@@ -43,7 +43,7 @@ XPF_SRCS   := $(wildcard $(XPF)/src/*.c)
 .PHONY: all choma img4 xpf grabkernel2 clean
 
 all: choma img4 xpf grabkernel2
-	@echo "==> 依赖就绪: $(BUILD)"
+	@echo "==> ????: $(BUILD)"
 
 # ---- ChOma ----
 choma: $(BUILD)/libchoma.a
@@ -56,7 +56,7 @@ $(BUILD)/libchoma.a: $(CHOMA_SRCS)
 	done
 	libtool $(BUILD)/choma/*.o -o $@
 
-# ---- img4lib（XPF 解压 kernelcache 用）----
+# ---- img4lib(XPF ?? kernelcache ?)----
 img4: $(BUILD)/libimg4.a
 
 $(BUILD)/libimg4.a: $(IMG4_SRCS)
@@ -67,7 +67,7 @@ $(BUILD)/libimg4.a: $(IMG4_SRCS)
 	done
 	libtool $(BUILD)/img4/*.o -o $@
 
-# ---- XPF（运行时 patchfinding）----
+# ---- XPF(??? patchfinding)----
 xpf: $(BUILD)/libxpf.a
 
 $(BUILD)/libxpf.a: $(XPF_SRCS) | choma
@@ -79,10 +79,10 @@ $(BUILD)/libxpf.a: $(XPF_SRCS) | choma
 	done
 	libtool $(BUILD)/xpf/*.o -o $@
 
-# ---- libgrabkernel2（从苹果 CDN 抓 kernelcache）----
-# 上游 Makefile 已支持 TARGET=ios 产出静态库，直接复用，避免重复维护编译参数。
+# ---- libgrabkernel2(??? CDN ? kernelcache)----
+# ?? Makefile ??? TARGET=ios ?????,????,???????????
 grabkernel2:
-	@echo "==> 构建 libgrabkernel2 (ios)"
+	@echo "==> ?? libgrabkernel2 (ios)"
 	$(MAKE) -C "$(GRAB)" TARGET=ios DISABLE_TESTS=1
 	@mkdir -p $(BUILD)
 	cp "$(GRAB)/output/ios/lib/libgrabkernel2.a" $(BUILD)/
