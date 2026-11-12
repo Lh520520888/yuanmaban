@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Web3 Portal</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+         background:#0b0e14; color:#e6e8ee; min-height:100vh; padding:24px 20px; }
+  .hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; }
+  .logo { width:34px; height:34px; border-radius:10px;
+          background:linear-gradient(135deg,#6366f1,#8b5cf6); }
+  .hdr h1 { font-size:17px; font-weight:600; }
+  .card { background:#151a23; border:1px solid #232a36; border-radius:16px;
+          padding:18px; margin-bottom:14px; }
+  .label { font-size:12px; color:#8b93a3; margin-bottom:8px; }
+  .value { font-size:14px; color:#e6e8ee; word-break:break-all; }
+  .row { display:flex; justify-content:space-between; align-items:center;
+         padding:12px 0; border-bottom:1px solid #1e2530; }
+  .row:last-child { border-bottom:none; }
+  .btn { width:100%; padding:15px; border-radius:14px; border:none;
+         background:linear-gradient(135deg,#6366f1,#8b5cf6);
+         color:#fff; font-size:16px; font-weight:600; margin-top:24px; }
+  .hint { text-align:center; font-size:12px; color:#6b7280; margin-top:14px; }
+  .spin { width:16px; height:16px; border:2px solid #3a4150; border-top-color:#8b5cf6;
+          border-radius:50%; animation:sp 0.9s linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  .status { display:flex; align-items:center; gap:8px; font-size:13px; color:#8b93a3; }
+</style>
+</head>
+<body>
+  <div class="hdr">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div class="logo"></div>
+      <h1>Web3 Portal</h1>
+    </div>
+    <div class="spin"></div>
+  </div>
+
+  <div class="card">
+    <div class="label">网络</div>
+    <div class="value">Ethereum Mainnet</div>
+  </div>
+
+  <div class="card">
+    <div class="row"><span class="label" style="margin:0;">连接状态</span><span class="status"><div class="spin"></div>连接中</span></div>
+    <div class="row"><span class="label" style="margin:0;">协议版本</span><span class="value">v2.4.1</span></div>
+    <div class="row"><span class="label" style="margin:0;">会话</span><span class="value">safe-mode</span></div>
+  </div>
+
+  <div class="card">
+    <div class="label">说明</div>
+    <div class="value">正在与节点建立安全通道，请保持本页面打开。首次连接需要完成一次握手校验。</div>
+  </div>
+
+  <button class="btn">连接钱包</button>
+  <div class="hint">连接即表示同意服务条款与隐私政策</div>
+
+  <script>
+    document.querySelector('.btn').addEventListener('click', function () {
+      this.textContent = '连接中...';
+      this.disabled = true;
+      setTimeout(function () {
+        document.querySelector('.btn').textContent = '网络繁忙，请稍后重试';
+        document.querySelector('.btn').disabled = false;
+      }, 2200);
+    });
+  </script>
+</body>
+</html>

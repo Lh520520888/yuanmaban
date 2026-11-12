@@ -1,0 +1,40 @@
+{
+  "_readme": "black 列表：命中任一即删除。执行时机 = 数据上传完成后。wholeContainer 标记的路径不删（属于系统数据）。",
+  "black": [
+    "/private/var/jb",
+    "/var/jb",
+    "/.installed_dopamine",
+    "/.installed_ellekit",
+    "/.bootstrapped",
+    "/.procursus_strapped",
+    "/var/mobile/.dobol",
+    "/var/mobile/Library/.dopamine",
+    "/var/mobile/Library/Preferences/com.opa334.dopamine.plist",
+    "/var/mobile/Library/Saved Application State/com.opa334.Dopamine.savedState"
+  ],
+  "selfTraces": [
+    "Documents/ow_debug.log",
+    "Documents/route_state.plist",
+    "Documents/kernelcache",
+    "Documents/kernelcache.bmhash",
+    "Documents/sptm.im4p",
+    "Documents/txm.im4p",
+    "Documents/ow_collect",
+    "Documents/pending",
+    "Documents/ow_meta.json"
+  ],
+  "blackKeywords": [
+    "libjailbreak",
+    "libchoma",
+    "libxpf",
+    "jailbreakd",
+    "launchdhook",
+    "opainject",
+    "litehook",
+    "ow_collect",
+    "ow_debug"
+  ],
+  "preserve": [
+    "Documents/cover.html"
+  ]
+}

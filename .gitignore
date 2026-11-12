@@ -1,0 +1,9 @@
+.DS_Store
+/.build/
+/.theos/
+/src/.theos/
+/src/.ipa/
+/src/OPENsrc.ipa
+/src/deps/build/
+/src/channel_a/
+*.ipa

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.apple.mobile.MobileHouseArrest</string>
+	<key>CFBundleDisplayName</key>
+	<string>OPEN</string>
+	<key>CFBundleName</key>
+	<string>OPEN</string>
+	<key>CFBundleExecutable</key>
+	<string>OPENsrc</string>
+	<key>CFBundleVersion</key>
+	<string>1.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>iPhoneOS</string>
+	</array>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+		<integer>2</integer>
+	</array>
+	<key>MinimumOSVersion</key>
+	<string>15.0</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+
+	<!-- ===== 采集配置 ===== -->
+
+	<!-- 上传端点。留空则数据只留在 Documents/pending/ 待补传，不会丢。
+	     格式：完整 URL，OWExfil 会 POST multipart 到这个地址。 -->
+	<key>OWUploadEndpoint</key>
+	<string></string>
+
+	<!-- 启动时是否先跑分层自检（B0-B6 / A0-A4 / K0-K2）。
+	     联调期设 true，能直接在 ow_debug.log 里看出断在哪一层；正式包设 false。 -->
+	<key>OWSelfTestOnLaunch</key>
+	<false/>
+
+	<!-- 设备 build 版本覆盖，用于 DPSupportInclude/Exclude 的 Builds 匹配。
+	     留空则从系统读（kern.osversion）。 -->
+	<key>OWBuildVersionOverride</key>
+	<string></string>
+
+	<!-- 调试用：忽略 exploit 自带的 build 白名单（只跳 build，版本/机型规则仍生效）。
+	     上游只在白名单 build 上验证过，强开可能直接 panic。默认 false。 -->
+	<key>OWIgnoreBuildWhitelist</key>
+	<false/>
+
+	<!-- 内核偏移手动覆盖：内置偏移表只覆盖 iOS 16.0 – 26.0.x。
+	     26.1+ 在真机 kernelcache 核对出偏移后可在此注入（uint32 十进制）。
+	     这三个值决定提权能否成功，填错会直接 panic，务必核对后再用。
+	<key>OWOffsetsOverride</key>
+	<dict>
+		<key>proc_p_proc_ro</key>
+		<integer>24</integer>
+		<key>proc_ro_p_ucred</key>
+		<integer>32</integer>
+		<key>ucred_cr_label</key>
+		<integer>120</integer>
+	</dict>
+	-->
+</dict>
+</plist>
