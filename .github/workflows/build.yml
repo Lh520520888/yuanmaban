@@ -10,19 +10,19 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: ????
+      - name: 环境信息
         run: |
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           brew install ldid xz libarchive || true
 
-      - name: ?? Theos
+      - name: 安装 Theos
         run: |
           export THEOS=$HOME/theos
           git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS"
@@ -33,32 +33,32 @@ jobs:
           ln -sfn "$SDK" "$THEOS/sdks/iPhoneOS${VER}.sdk"
           echo "THEOS=$THEOS" >> "$GITHUB_ENV"
 
-      - name: ?????
+      - name: 拉上游源码
         run: bash ci_fetch_deps.sh
 
-      - name: ???? A(BaseBin + 9 ? exploit)
+      - name: 构建通道 A（BaseBin + 9 个 exploit）
         continue-on-error: true
         run: bash tools/build_channel_a.sh
 
-      - name: ???????
+      - name: 构建内核静态库
         continue-on-error: true
         run: make -C src deps
 
-      - name: ??
+      - name: 编译
         run: |
           make -C src clean || true
           make -C src -j"$(sysctl -n hw.ncpu)" package
 
-      - name: ??? A ???? app
+      - name: 把通道 A 产物装进 app
         continue-on-error: true
         run: make -C src exploits
 
-      - name: ? IPA
+      - name: 出 IPA
         run: |
           make -C src ipa
           ls -lh src/OPENsrc.ipa
 
-      - name: ????
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: OPENsrc-ipa
