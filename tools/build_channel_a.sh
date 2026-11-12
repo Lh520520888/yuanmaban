@@ -78,7 +78,8 @@ for name in "${EXPLOITS[@]}"; do
             -target "$name" \
             -configuration Release \
             -sdk iphoneos \
-            -derivedDataPath "$BUILDDIR" \
+            SYMROOT="$BUILDDIR/Build/Products" \
+            OBJROOT="$BUILDDIR/Build/Intermediates" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
             build > "$BUILDDIR/$name.log" 2>&1; then
         echo "    构建失败，末尾 25 行（完整日志: .build/channel_a/$name.log）："
