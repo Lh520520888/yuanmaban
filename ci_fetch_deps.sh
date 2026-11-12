@@ -23,7 +23,7 @@ clone "01-越狱内核/Dopamine" https://github.com/opa334/Dopamine
 # 独立源码树：deps 静态库要用
 clone "01-越狱内核/ChOma" https://github.com/opa334/ChOma
 clone "01-越狱内核/XPF" https://github.com/opa334/XPF
-clone "05-工具链/libgrabkernel2" https://github.com/opa334/libgrabkernel2
+clone "05-工具链/libgrabkernel2" https://github.com/alfiecg24/libgrabkernel2
 
 echo "== 上游源码就绪 =="
 for d in 01-越狱内核/Dopamine 01-越狱内核/ChOma 01-越狱内核/XPF 05-工具链/libgrabkernel2; do
