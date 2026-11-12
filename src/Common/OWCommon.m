@@ -196,6 +196,10 @@ static int ow_sysctl_string(const char *name, char *buf, size_t sz) {
 
 @implementation OWDeviceProfile
 
+// 手写了 bootManifestHash 的 getter，clang 不会再自动合成 ivar，
+// 必须显式声明，否则 _bootManifestHash 未定义（CI 实测报错）。
+@synthesize bootManifestHash = _bootManifestHash;
+
 + (instancetype)current {
     static OWDeviceProfile *p;
     static dispatch_once_t once;
