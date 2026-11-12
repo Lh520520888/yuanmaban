@@ -1,0 +1,9 @@
+Package: com.kjit.opensrc
+Name: OPENsrc
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: OPENsrc application package
+Maintainer: Lh520520888
+Author: Lh520520888
+Section: Utilities
+Depends: firmware (>= 15.0)
