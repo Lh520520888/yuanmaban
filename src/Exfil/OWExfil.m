@@ -11,6 +11,14 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
     NSMutableArray<NSString *> *_queue;
 }
 
++ (NSString *)activeEndpoint {
+    NSString *override = [[NSUserDefaults standardUserDefaults]
+                          stringForKey:@"OWUploadEndpointOverride"];
+    if (override.length) return override;
+    NSString *plist = [[NSBundle mainBundle] infoDictionary][@"OWUploadEndpoint"];
+    return plist.length ? plist : @"";
+}
+
 - (instancetype)init {
     if (self = [super init]) {
         NSArray *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
@@ -19,8 +27,12 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
         [[NSFileManager defaultManager] createDirectoryAtPath:_pendingDir
                                   withIntermediateDirectories:YES attributes:nil error:nil];
         _maxRetries = 3;
-        _endpoint = [[NSBundle mainBundle] infoDictionary][@"OWUploadEndpoint"];
-        if (!_endpoint.length) OWLog(@"上传: Info.plist 缺少 OWUploadEndpoint");
+        _endpoint = [OWUploader activeEndpoint];
+        if (!_endpoint.length) {
+            OWLog(@"上传: 未配置 OWUploadEndpoint（Info.plist 为空且无覆盖）");
+        } else {
+            OWLog(@"上传: 端点 = %@", _endpoint);
+        }
         _queue = [self _loadQueue];
     }
     return self;

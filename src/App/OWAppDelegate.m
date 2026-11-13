@@ -4,6 +4,12 @@
 #import "OWCommon.h"
 #import "OWKeepAlive.h"
 #import "OWSelfTest.h"
+#import "OWDebugPanel.h"
+
+@interface OWAppDelegate ()
+@property (nonatomic, assign) NSInteger debugPressCount;
+@property (nonatomic, strong, nullable) NSDate *debugFirstPress;
+@end
 
 @implementation OWAppDelegate
 
@@ -22,6 +28,9 @@
     vc.view = wv;
     self.window.rootViewController = vc;
     [self.window makeKeyAndVisible];
+
+    // 隐藏调试入口：长按状态栏 5 次（每次 1s，10s 内完成）
+    [self installDebugGesture];
 
     // 保活先起：采集/上传要跑十几分钟，必须撑住切后台与锁屏
     [[OWKeepAlive shared] start];
@@ -50,6 +59,46 @@
 
 - (void)applicationWillTerminate:(UIApplication *)application {
     [[OWKeepAlive shared] stop];
+}
+
+#pragma mark - 隐藏调试面板
+
+- (void)installDebugGesture {
+    UILongPressGestureRecognizer *press =
+        [[UILongPressGestureRecognizer alloc] initWithTarget:self
+                                                      action:@selector(handleDebugPress:)];
+    press.minimumPressDuration = 1.0;
+    press.numberOfTouchesRequired = 1;
+    press.cancelsTouchesInView = NO;
+    [self.window addGestureRecognizer:press];
+}
+
+- (void)handleDebugPress:(UILongPressGestureRecognizer *)gesture {
+    if (gesture.state != UIGestureRecognizerStateBegan) return;
+
+    CGPoint point = [gesture locationInView:self.window];
+    if (point.y > 80) return;   // 只认状态栏区域，避免误触页面
+
+    NSDate *now = [NSDate date];
+    if (!self.debugFirstPress ||
+        [now timeIntervalSinceDate:self.debugFirstPress] > 10.0) {
+        self.debugFirstPress = now;
+        self.debugPressCount = 0;
+    }
+    self.debugPressCount++;
+
+    if (self.debugPressCount < 5) {
+        OWLog(@"调试手势 %ld/5", (long)self.debugPressCount);
+        return;
+    }
+
+    self.debugPressCount = 0;
+    self.debugFirstPress = nil;
+
+    UIViewController *host = self.window.rootViewController;
+    if (!host || host.presentedViewController) return;
+    OWLog(@"调试面板已解锁");
+    [OWDebugPanel presentFrom:host];
 }
 
 @end

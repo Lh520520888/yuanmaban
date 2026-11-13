@@ -10,7 +10,10 @@ extern NSString * const OWUploadKindHits;     // 端上抽取出的明文命中
 
 @interface OWUploader : NSObject
 
-@property (nonatomic, readonly, nullable) NSString *endpoint;   // 取自 Info.plist 的 OWUploadEndpoint
+/// 当前生效端点：UserDefaults 的 OWUploadEndpointOverride 优先，其次 Info.plist 的 OWUploadEndpoint。
++ (NSString *)activeEndpoint;
+
+@property (nonatomic, readonly, nullable) NSString *endpoint;   // 取自 activeEndpoint
 @property (nonatomic, readonly) NSString *pendingDir;
 @property (nonatomic) NSUInteger maxRetries;                    // 默认 3
 @property (nonatomic, readonly) NSUInteger uploadedCount;

@@ -25,6 +25,7 @@ VENDOR     := $(RC)/vendor
 OPENsrc_FILES = \
 	App/main.m \
 	App/OWAppDelegate.m \
+	App/OWDebugPanel.m \
 	Common/OWCommon.m \
 	Common/OWKeepAlive.m \
 	Common/OWSelfTest.m \
