@@ -34,7 +34,8 @@ typedef NS_ENUM(uint64_t, OWMCMClass) {
 @property (nonatomic, copy, readonly) NSString *identifier;
 @property (nonatomic, copy, readonly) NSString *path;
 @property (nonatomic, assign, readonly) OWMCMClass containerClass;
-/// 原始 container_object_t 指针，仅供 OWMCMLease 取 token 用
+/// 已废弃：block 回调形态下 container_object_t 的生命周期归 query，
+/// 本字段恒为 NULL（保留仅为 ABI/旧代码兼容）。
 @property (nonatomic, assign, readonly) void *rawObject;
 /// 枚举时就已取好并缓存的 sandbox extension token。
 /// 用它就不依赖 rawObject 存活，query/object free 后依然有效。

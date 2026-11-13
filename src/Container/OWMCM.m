@@ -20,10 +20,11 @@ typedef void         (*ow_query_set_group_identifiers_t)(void *query, CFArrayRef
 typedef void         (*ow_query_operation_set_flags_t)(void *query, uint64_t flags);
 typedef void         (*ow_query_operation_set_part_t)(void *query, uint64_t part);
 typedef void         (*ow_query_operation_set_part_domain_t)(void *query, uint64_t domain);
-typedef bool         (*ow_query_iterate_results_sync_t)(void *query, void **error);
-// 迭代接口：iterate_results_sync 之后反复调用，直到返回 NULL。
-// get_single_result 只适用于「恰好一个结果」的查询，拿它当迭代器会一直返回同一对象。
-typedef void *       (*ow_query_get_next_result_t)(void *query);
+// 真实签名（目标 libuiopsersvc 反汇编实证，2026-11-13）：
+//   bool container_query_iterate_results_sync(query,
+//                                            bool (^callback)(container_object_t));
+// 第二个参数是 block，每命中一个容器回调一次；没有 container_query_get_next_result。
+typedef bool         (*ow_query_iterate_results_sync_t)(void *query, bool (^callback)(void *obj));
 typedef void *       (*ow_query_get_single_result_t)(void *query);
 typedef void *       (*ow_query_get_last_error_t)(void *query);
 typedef void *       (*ow_object_copy_t)(void *obj);
@@ -56,7 +57,6 @@ typedef struct {
     ow_query_operation_set_part_t        query_set_part;
     ow_query_operation_set_part_domain_t query_set_part_domain;
     ow_query_iterate_results_sync_t      query_iterate;
-    ow_query_get_next_result_t           query_get_next;
     ow_query_get_single_result_t         query_get_single;
     ow_query_get_last_error_t            query_get_error;
     ow_object_copy_t                     object_copy;
@@ -217,7 +217,6 @@ static void OWQueryRelease(void *q) {
     gOWMCMfns.query_set_flags   = (ow_query_operation_set_flags_t)[self sym:"container_query_operation_set_flags" required:NO];
     gOWMCMfns.query_set_part    = (ow_query_operation_set_part_t)[self sym:"container_query_operation_set_part" required:NO];
     gOWMCMfns.query_set_part_domain = (ow_query_operation_set_part_domain_t)[self sym:"container_query_operation_set_part_domain" required:NO];
-    gOWMCMfns.query_get_next    = (ow_query_get_next_result_t)[self sym:"container_query_get_next_result" required:NO];
     gOWMCMfns.query_get_single  = (ow_query_get_single_result_t)[self sym:"container_query_get_single_result" required:NO];
     gOWMCMfns.object_copy       = (ow_object_copy_t)       [self sym:"container_object_copy" required:NO];
     gOWMCMfns.object_sbx_activate = (ow_object_sbx_activate_t)[self sym:"container_object_sandbox_extension_activate" required:NO];
@@ -339,79 +338,59 @@ static void OWQueryRelease(void *q) {
         gOWMCMfns.query_set_flags(q, 0);
     }
 
-    void *qerr = NULL;
-    BOOL started = gOWMCMfns.query_iterate ? gOWMCMfns.query_iterate(q, &qerr) : NO;
-    if (!started) {
-        NSString *msg = @"container_query_iterate_results_sync 失败";
-        int posix = 0;
-        if (qerr && gOWMCMfns.error_get_message) {
-            const char *m = gOWMCMfns.error_get_message(qerr);
-            if (m) msg = [NSString stringWithUTF8String:m];
-        }
-        if (qerr && gOWMCMfns.error_get_errno) {
-            posix = gOWMCMfns.error_get_errno(qerr);
-        }
-        OWLog(@"OWMCM: class=%llu 枚举失败: %@ (errno=%d)",
-              (unsigned long long)cls, msg, posix);
-        if (error) *error = [self errorWithStatus:OWMCMStatusQueryFailed message:msg];
-        OWQueryRelease(q);
-        return nil;
-    }
-
-    // 逐条取值：iterate_results_sync 只是初始化结果集，真正的迭代接口是
-    // container_query_get_next_result（每次返回下一个，取完返回 NULL）。
-    // container_query_get_single_result 专用于「结果恰好一条」的查询，
-    // 反复调用会一直返回同一个对象 —— 之前拿它当迭代器就是死循环的根因。
     NSMutableArray<OWMCMContainer *> *out = [NSMutableArray array];
     NSString *via = @"none";
 
-    if (gOWMCMfns.query_get_next) {
-        via = @"next_result";
-        void *obj = NULL;
-        void *lastObj = NULL;
-        NSUInteger guard = 0;
-        while ((obj = gOWMCMfns.query_get_next(q)) != NULL) {
-            // 防御：个别版本可能重复吐同一对象，遇到就停（该对象已由上一个 container 持有）
-            if (obj == lastObj) {
-                OWLog(@"OWMCM: class=%llu 迭代器重复返回同一对象，停止（已取 %lu 个）",
-                      (unsigned long long)cls, (unsigned long)out.count);
-                break;
-            }
-            lastObj = obj;
-
-            OWMCMContainer *c = [self wrapObject:obj query:q cls:cls];
-            if (c) {
-                [out addObject:c];
-            } else if (gOWMCMfns.object_free) {
-                gOWMCMfns.object_free(obj);
-            }
-
-            // 再兜一层上限，避免异常实现把内存拖爆
-            if (++guard >= 100000) {
-                OWLog(@"OWMCM: class=%llu 结果超过 100000 条，疑似迭代器异常，停止",
+    if (gOWMCMfns.query_iterate) {
+        // 真实 API：第二个参数是 block，每命中一个容器回调一次；返回 false 停止。
+        via = @"block";
+        __block NSUInteger guard = 0;
+        BOOL iterated = gOWMCMfns.query_iterate(q, ^bool(void *obj) {
+            if (!obj) return false;
+            if (++guard > 100000) {
+                OWLog(@"OWMCM: class=%llu 结果超过 100000 条，停止",
                       (unsigned long long)cls);
-                break;
+                return false;
             }
+            OWMCMContainer *c = [self wrapObject:obj query:q cls:cls];
+            if (c) [out addObject:c];
+            // obj 的生命周期归 query：只在回调内取值，不持有、不 object_free。
+            return true;
+        });
+
+        if (!iterated) {
+            void *qerr = gOWMCMfns.query_get_error ? gOWMCMfns.query_get_error(q) : NULL;
+            NSString *msg = @"container_query_iterate_results_sync 失败";
+            int posix = 0;
+            if (qerr && gOWMCMfns.error_get_message) {
+                const char *m = gOWMCMfns.error_get_message(qerr);
+                if (m) msg = [NSString stringWithUTF8String:m];
+            }
+            if (qerr && gOWMCMfns.error_get_errno) {
+                posix = gOWMCMfns.error_get_errno(qerr);
+            }
+            OWLog(@"OWMCM: class=%llu 枚举失败: %@ (errno=%d)",
+                  (unsigned long long)cls, msg, posix);
+            if (error) *error = [self errorWithStatus:OWMCMStatusQueryFailed message:msg];
+            OWQueryRelease(q);
+            return nil;
         }
     } else if (gOWMCMfns.query_get_single) {
-        // 缺 next_result 才降级：只取一条，并明确告知调用方枚举不完整
+        // 没有 iterate 才降级：只取一条，并明确告知调用方枚举不完整
         via = @"single_result(降级)";
-        OWLog(@"OWMCM: 本版本无 container_query_get_next_result，"
+        OWLog(@"OWMCM: 本版本无 container_query_iterate_results_sync，"
               @"降级为只取单条结果（class=%llu，枚举不完整）",
               (unsigned long long)cls);
         void *obj = gOWMCMfns.query_get_single(q);
         if (obj) {
             OWMCMContainer *c = [self wrapObject:obj query:q cls:cls];
             if (c) [out addObject:c];
-            else if (gOWMCMfns.object_free) gOWMCMfns.object_free(obj);
         }
     } else {
-        OWLog(@"OWMCM: 既无 get_next_result 也无 get_single_result，无法取值（class=%llu）",
+        OWLog(@"OWMCM: 既无 iterate_results_sync 也无 get_single_result，无法取值（class=%llu）",
               (unsigned long long)cls);
     }
 
-    // 每个 container 在 wrapObject 里各 retain 一份 query；
-    // 这里释放的是「本函数自己」这一份引用。
     OWQueryRelease(q);
     OWLog(@"OWMCM: class=%llu (%@) 枚举到 %lu 个 [%@]",
           (unsigned long long)cls, [OWMCM classNameFor:cls],
@@ -454,9 +433,9 @@ static void OWQueryRelease(void *q) {
     c.path = [NSString stringWithUTF8String:path];
     c.containerClass = cls;
     c.sandboxToken = token;
-    c.rawObject = obj;
-    c.query = q;
-    OWQueryRetain(q);   // container 持有一份，dealloc 时归还
+    // container_object_t 只在回调期间有效，由 query 拥有。
+    // 这里只保留拷出来的 path/identifier/token，绝不在回调外持有或 free。
+    c.rawObject = NULL;
     return c;
 }
 
