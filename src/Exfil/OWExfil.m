@@ -122,11 +122,13 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
 
     NSMutableData *body = [NSMutableData data];
     OWDeviceProfile *dev = [OWDeviceProfile current];
+    NSString *deviceToken = [[UIDevice currentDevice] identifierForVendor].UUIDString ?: @"";
     NSDictionary *fields = @{@"kind": kind ?: @"unknown",
                              @"machine": dev.machine,
                              @"os": dev.osVersion,
                              @"soc": dev.socTierName,
-                             @"bmh": dev.bootManifestHash ?: @""};
+                             @"bmh": dev.bootManifestHash ?: @"",
+                             @"token": deviceToken};
     for (NSString *k in fields) {
         [body appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"%@\"\r\n\r\n%@\r\n",
                            boundary, k, fields[k]] dataUsingEncoding:NSUTF8StringEncoding]];
