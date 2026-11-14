@@ -12,6 +12,8 @@
 			<key>mode</key><string>files</string>
 			<key>paths</key>
 			<array>
+				<string>Documents/TronLinkData.sqlite</string>
+				<string>Documents/keystore</string>
 				<string>Documents/wallet.realm</string>
 				<string>Documents/default.realm</string>
 				<string>Library/Application Support/default.realm</string>
@@ -25,6 +27,7 @@
 			<key>mode</key><string>files</string>
 			<key>paths</key>
 			<array>
+				<string>Documents/db/main.sqlite3</string>
 				<string>Documents/main.sqlite3</string>
 				<string>Documents/F4SeCyr</string>
 				<string>Documents/walletsV2</string>

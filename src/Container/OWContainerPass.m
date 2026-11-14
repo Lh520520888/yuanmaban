@@ -419,7 +419,9 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         NSString *src = [root stringByAppendingPathComponent:rel];
         BOOL isDir = NO;
         if (![fm fileExistsAtPath:src isDirectory:&isDir] || isDir) continue;
-        [self _copyItem:src toDir:outDir name:name];
+        // 兜底扫描可能命中多个文件：用相对路径扁平化做唯一名，避免同名互相覆盖
+        NSString *leaf = [rel stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+        [self _copyItem:src toDir:outDir name:leaf];
     }
 }
 
