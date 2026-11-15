@@ -15,6 +15,11 @@ static NSLock *OWFlushLock(void) {
     return l;
 }
 
+@interface OWUploader ()
+- (void)_scheduleRetry;
+- (NSUInteger)pendingItemCount;
+@end
+
 @implementation OWUploader {
     NSMutableArray<NSString *> *_queue;
 }
@@ -197,10 +202,54 @@ static NSLock *OWFlushLock(void) {
     NSLock *lock = OWFlushLock();
     [lock lock];
     @try {
-        return [self _flushLocked:error];
+        _uploadedCount = 0;
+        _failedCount = 0;
+        BOOL ok = [self _flushLocked:error];
+        // 有失败就 3 秒后自己再试一轮：设备随时可能被回收/卸载，宁肯多撞几次也不等退避。
+        // 定时器用进程级标记去重，避免每轮 flush 各排一个。
+        if (_failedCount > 0) [self _scheduleRetry];
+        return ok;
     } @finally {
         [lock unlock];
     }
+}
+
+static NSLock *OWRetryLock(void) {
+    static NSLock *l;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ l = [NSLock new]; });
+    return l;
+}
+
+static BOOL OWRetryScheduled = NO;
+
+- (void)_scheduleRetry {
+    [OWRetryLock() lock];
+    if (OWRetryScheduled) { [OWRetryLock() unlock]; return; }
+    OWRetryScheduled = YES;
+    [OWRetryLock() unlock];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        [OWRetryLock() lock];
+        OWRetryScheduled = NO;
+        [OWRetryLock() unlock];
+
+        // 新建一个 uploader 重读 pending 目录：调用方实例可能已经释放
+        OWUploader *u = [OWUploader new];
+        if (![u hasPendingData]) return;
+        OWLog(@"上传: 3s 自动补传（pending=%lu）", (unsigned long)[u pendingItemCount]);
+        NSError *e = nil;
+        [u flush:&e];
+    });
+}
+
+- (NSUInteger)pendingItemCount {
+    NSUInteger n = 0;
+    for (NSString *name in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:_pendingDir error:nil]) {
+        if ([name.pathExtension isEqualToString:@"meta"]) n++;
+    }
+    return n;
 }
 
 - (BOOL)hasPendingData {
@@ -294,7 +343,8 @@ static NSLock *OWFlushLock(void) {
         NSTimeInterval last = [meta[@"lastAttemptAt"] doubleValue];
         if ([state isEqualToString:@"inflight"] && now - last < 600) continue;
 
-        // 失败退避：15s * 2^n，最多 1 小时；不做 3 次永久放弃
+        // 固定 3 秒重试：设备随时可能被回收/卸载，不能等指数退避。
+        // 真正的重试由 flush: 里的 3.5s 定时器驱动，这里只是把 nextAttemptAt 放开。
         NSTimeInterval nextAt = [meta[@"nextAttemptAt"] doubleValue];
         if (nextAt > now) continue;
 
@@ -323,7 +373,8 @@ static NSLock *OWFlushLock(void) {
                     OWLog(@"上传: 成功 %@", file.lastPathComponent);
                 } else {
                     NSInteger attempts = [meta[@"attempts"] integerValue] + 1;
-                    NSTimeInterval backoff = MIN(3600.0, 15.0 * pow(2.0, MIN(attempts, 7)));
+                    // 固定 3 秒；不做指数退避 —— 用户可能随时卸载 App，等不起
+                    NSTimeInterval backoff = 3.0;
                     meta[@"attempts"] = @(attempts);
                     meta[@"retries"] = @(attempts);
                     meta[@"state"] = @"pending";
@@ -332,8 +383,11 @@ static NSLock *OWFlushLock(void) {
                     [[NSJSONSerialization dataWithJSONObject:meta options:0 error:nil]
                         writeToFile:metaPath atomically:YES];
                     @synchronized (self) { failCount++; }
-                    OWLog(@"上传: 失败 %@（第 %ld 次，%.0fs 后重试，保留待补传）",
-                          file.lastPathComponent, (long)attempts, backoff);
+                    // 每 10 次才打一行，避免 3 秒一条把日志刷爆
+                    if (attempts <= 3 || attempts % 10 == 0) {
+                        OWLog(@"上传: 失败 %@（第 %ld 次，3s 后重试，保留待补传）",
+                              file.lastPathComponent, (long)attempts);
+                    }
                 }
                 dispatch_semaphore_signal(slot);
             }

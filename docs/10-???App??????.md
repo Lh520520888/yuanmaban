@@ -547,7 +547,7 @@ B: TokenPocket 完成（0.1s）
 | 24h 重采 + done TTL | `OWRoute._run`、`OWState.shouldSkipForTTL/beginNewRun` | `doneAt/nextRunAt` 判定；到期走 `beginNewRun` 生成新 `runId` |
 | done 前先 flush pending | `OWRoute._run` | 未满 24h 也会先补传，`hasPendingData` 决定是否续跑 |
 | pending 原子入队 | `OWExfil.enqueueFile:kind:priority:error:` | 先写 `.tmp` 再 rename，避免半文件 |
-| 上传退避/不永久丢 | `OWExfil._flushLocked` | inflight 10min、15s×2^n 退避、最多 1h；`_cleanupOrphans` 清理旧超大 pending |
+| 上传退避/不永久丢 | `OWExfil._flushLocked` + `flush:` | 失败固定 **3 秒**重试（不做指数退避，防止设备被卸载前没传完），3.5s 定时器自动补传、进程级去重；inflight 10min 回收；`_cleanupOrphans` 清理旧超大 pending |
 | 大文件 180s 超时 | `OWExfil._post` | >20MB 自动放宽 |
 | 单目标 150MB / zip 150MB | `OWContainerPass._copyItem`、`OWRoute._uploadContainerResult` | 大目录不再到 398MB |
 | 目录过滤 + 宽兜底 | `OWContainerPass._collectAndIndex` | 定义目录先按 exts/keywords 过滤；漏掉时再按「无扩展名 / 小文件 / 非媒体」收，接住 F4SeCyr 这类密钥文件 |
