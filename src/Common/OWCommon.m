@@ -88,6 +88,8 @@ NSString * const OWStateKeyKernelAttempts  = @"kernelAttempts";
 NSString * const OWStateKeyKernelExhausted = @"kernelExhausted";
 NSString * const OWStateKeyKeysAcquired    = @"keysAcquired";
 NSString * const OWStateKeyLastError       = @"lastError";
+NSString * const OWStateKeyDoneAt          = @"doneAt";
+NSString * const OWStateKeyNextRunAt       = @"nextRunAt";
 
 @implementation OWState {
     NSMutableDictionary *_store;
@@ -178,8 +180,43 @@ NSString * const OWStateKeyLastError       = @"lastError";
 
 - (BOOL)markDoneIfPayloadValid:(BOOL)valid {
     if (!valid) return NO;
-    [self setObject:@YES forKey:OWStateKeyDone];
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    dispatch_sync(_q, ^{
+        _store[OWStateKeyDone] = @YES;
+        _store[OWStateKeyDoneAt] = @(now);
+        _store[OWStateKeyNextRunAt] = @(now + 24.0 * 3600.0);
+        [_store writeToFile:_path atomically:YES];
+    });
     return YES;
+}
+
+- (NSTimeInterval)doneAt {
+    return [[self objectForKey:OWStateKeyDoneAt] doubleValue];
+}
+
+- (NSTimeInterval)nextRunAt {
+    return [[self objectForKey:OWStateKeyNextRunAt] doubleValue];
+}
+
+- (BOOL)shouldSkipForTTL:(NSTimeInterval)ttl {
+    NSTimeInterval doneAt = [self doneAt];
+    if (doneAt <= 0) return NO;
+    return ([[NSDate date] timeIntervalSince1970] - doneAt) < ttl;
+}
+
+- (void)beginNewRun {
+    dispatch_sync(_q, ^{
+        // 清掉上一轮/上次中断留下的结果，避免旧 payloads 让本轮误判“已完成”
+        [_store removeObjectForKey:OWStateKeyDone];
+        [_store removeObjectForKey:OWStateKeyPayloads];
+        [_store removeObjectForKey:OWStateKeyKeysAcquired];
+        [_store removeObjectForKey:OWStateKeyLastError];
+        [_store removeObjectForKey:@"phase"];
+        [_store removeObjectForKey:@"emptyRounds"];
+        // 保留 kernelAttempts / kernelExhausted（一次性 exploit 不应重复尝试）
+        // 保留 doneAt / nextRunAt 作为上次完成时间的历史
+        [_store writeToFile:_path atomically:YES];
+    });
 }
 
 - (void)notePayload:(NSString *)name bytes:(uint64_t)bytes valid:(BOOL)valid {

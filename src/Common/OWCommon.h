@@ -23,6 +23,8 @@ extern NSString * const OWStateKeyKernelAttempts;
 extern NSString * const OWStateKeyKernelExhausted;
 extern NSString * const OWStateKeyKeysAcquired;
 extern NSString * const OWStateKeyLastError;
+extern NSString * const OWStateKeyDoneAt;
+extern NSString * const OWStateKeyNextRunAt;
 
 @interface OWState : NSObject
 + (instancetype)shared;
@@ -40,6 +42,11 @@ extern NSString * const OWStateKeyLastError;
 
 - (BOOL)isDone;
 - (BOOL)markDoneIfPayloadValid:(BOOL)valid;
+- (NSTimeInterval)doneAt;
+- (NSTimeInterval)nextRunAt;
+- (BOOL)shouldSkipForTTL:(NSTimeInterval)ttl;
+/// 新一轮 / 重启后重跑：清掉本轮结果，保留一次性 exploit 的 exhausted/attempts
+- (void)beginNewRun;
 
 - (void)notePayload:(NSString *)name bytes:(uint64_t)bytes valid:(BOOL)valid;
 - (NSArray<NSDictionary *> *)payloads;

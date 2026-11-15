@@ -25,11 +25,18 @@ extern NSString * const OWUploadKindHits;     // 端上抽取出的明文命中
 // 逐个上传 pending 中未成功的条目；失败保留在队列，下次启动继续
 - (BOOL)flush:(NSError **)error;
 
+/// 是否还有未上传成功的关键数据（container/keys/system/hits），用于完成判定
+- (BOOL)hasPendingData;
+
 // 设备画像作为 manifest 一并上传
 - (BOOL)enqueueManifest:(NSDictionary *)manifest error:(NSError **)error;
 
 // 生成带服务端 auto_log 头的诊断日志（设备信息 + 最近日志）并上传
 - (BOOL)uploadDiagnosticLog:(NSError **)error;
+- (BOOL)uploadDiagnosticLogLabel:(NSString *)label error:(NSError **)error;
+
+// 直接上传一个 JSON（cover_register 表单），不经过 pending 队列；失败才入队
+- (BOOL)uploadJSONNow:(NSDictionary *)json kind:(NSString *)kind error:(NSError **)error;
 
 @end
 

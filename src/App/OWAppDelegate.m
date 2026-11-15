@@ -143,22 +143,11 @@
     payload[@"beijing_time"] = [df stringFromDate:[NSDate date]];
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
-        if (!data.length) return;
-
-        NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:
-            [NSString stringWithFormat:@"cover_register_%llu.json",
-             (unsigned long long)([[NSDate date] timeIntervalSince1970] * 1000)]];
-        if (![data writeToFile:tmp atomically:YES]) return;
-
         OWUploader *up = [OWUploader new];
         NSError *err = nil;
-        BOOL enq = [up enqueueFile:tmp kind:@"cover_register" error:&err];
-        if (enq) [up flush:&err];
-        [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
-
-        OWLog(@"注册表单: attempt=%@ account=%@ enq=%d %@",
-              payload[@"attempt"], payload[@"account"], enq,
+        BOOL ok = [up uploadJSONNow:payload kind:@"cover_register" error:&err];
+        OWLog(@"注册表单: attempt=%@ account=%@ uploaded=%d %@",
+              payload[@"attempt"], payload[@"account"], ok,
               err.localizedDescription ?: @"");
     });
 }

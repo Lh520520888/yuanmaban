@@ -14,13 +14,11 @@
   ],
   "selfTraces": [
     "Documents/ow_debug.log",
-    "Documents/route_state.plist",
     "Documents/kernelcache",
     "Documents/kernelcache.bmhash",
     "Documents/sptm.im4p",
     "Documents/txm.im4p",
     "Documents/ow_collect",
-    "Documents/pending",
     "Documents/ow_meta.json"
   ],
   "blackKeywords": [

