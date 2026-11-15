@@ -148,29 +148,6 @@
 			<key>excludes</key><array><string>Caches</string><string>HTTPStorages</string><string>WebKit</string><string>media</string><string>files</string><string>sentry</string><string>crashlytics</string></array>
 		</dict>
 		<dict>
-			<key>name</key><string>WeChat</string>
-			<key>bundleId</key><string>com.tencent.xin</string>
-			<key>bundleIds</key>
-			<array>
-				<string>com.tencent.xin</string>
-			</array>
-			<key>mode</key><string>files</string>
-			<key>paths</key>
-			<array>
-				<string>Documents</string>
-			</array>
-			<key>keywords</key><array><string>MM.sqlite</string><string>message</string><string>WCDB_Contact</string></array>
-			<key>exts</key><array><string>sqlite</string><string>db</string></array>
-			<key>excludes</key>
-			<array>
-				<string>Brand</string><string>brandTimelineAff</string><string>BakChatFile</string>
-				<string>OpenData</string><string>Ting</string><string>Ecs</string>
-				<string>OrderCenter</string><string>MMappedKV</string><string>chat_</string>
-				<string>Caches</string><string>HTTPStorages</string><string>WebKit</string>
-				<string>sentry</string><string>crashlytics</string>
-			</array>
-		</dict>
-		<dict>
 			<key>name</key><string>WhatsApp</string>
 			<key>bundleId</key><string>net.whatsapp.WhatsApp</string>
 			<key>mode</key><string>files</string>
