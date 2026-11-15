@@ -456,85 +456,114 @@ static void OWQueryRelease(void *q) {
 
 /// 第二阶段：按 identifier 定向查询，get_single_result 后取 path + token。
 /// 目标 dylib 的迭代回调只暴露 identifier，path 必须走这一步。
+/// token 只在特定 part/flags 组合下签发，所以这里做小矩阵探测。
 - (nullable OWMCMContainer *)_targetedContainerForClass:(OWMCMClass)cls
                                              identifier:(NSString *)identifier
                                                   error:(NSError **)error {
     if (!identifier.length || !gOWMCMfns.query_create) return nil;
 
-    void *q = gOWMCMfns.query_create();
-    if (!q) return nil;
-    OWQueryRetain(q);
-
-    gOWMCMfns.query_set_class(q, (uint64_t)cls);
-
     void *xid = gXPCString ? gXPCString(identifier.UTF8String) : NULL;
-    if (cls == OWMCMClassAppGroup && gOWMCMfns.query_set_group_identifiers) {
-        gOWMCMfns.query_set_group_identifiers(q, xid);
-    } else if (gOWMCMfns.query_set_identifiers) {
-        gOWMCMfns.query_set_identifiers(q, xid);
-    }
 
-    if (gOWMCMfns.query_set_flags) {
-        gOWMCMfns.query_set_flags(q, 0x100000000ULL);
-    }
-    if (gOWMCMfns.query_set_part) {
-        gOWMCMfns.query_set_part(q, 0);
-    }
+    static const uint64_t kFlags[] = {0x100000000ULL, 0x800000000ULL, 0x8000000000ULL};
+    static const uint64_t kParts[] = {0, 1, 2, 3, 4};
+    NSUInteger partCount = (cls == OWMCMClassAppGroup) ? 2 : 5; // group 只试 0 / 3
 
-    void *obj = gOWMCMfns.query_get_single ? gOWMCMfns.query_get_single(q) : NULL;
-    if (!obj) {
-        void *qerr = gOWMCMfns.query_get_error ? gOWMCMfns.query_get_error(q) : NULL;
-        NSString *msg = @"get_single_result 为空";
-        if (qerr && gOWMCMfns.error_get_message) {
-            const char *m = gOWMCMfns.error_get_message(qerr);
-            if (m) msg = [NSString stringWithUTF8String:m];
+    NSString *bestPath = nil, *bestIdent = nil, *bestToken = nil;
+    BOOL bestActivated = NO, foundToken = NO;
+    uint64_t hitPart = 0, hitFlags = 0;
+    NSString *lastErrorMsg = nil;
+
+    for (NSUInteger fi = 0; fi < 3 && !foundToken; fi++) {
+        for (NSUInteger pi = 0; pi < partCount && !foundToken; pi++) {
+            uint64_t part = (cls == OWMCMClassAppGroup && pi == 1) ? 3 : kParts[pi];
+            uint64_t flags = kFlags[fi];
+
+            void *q = gOWMCMfns.query_create();
+            if (!q) continue;
+            OWQueryRetain(q);
+
+            gOWMCMfns.query_set_class(q, (uint64_t)cls);
+            if (cls == OWMCMClassAppGroup && gOWMCMfns.query_set_group_identifiers) {
+                gOWMCMfns.query_set_group_identifiers(q, xid);
+            } else if (gOWMCMfns.query_set_identifiers) {
+                gOWMCMfns.query_set_identifiers(q, xid);
+            }
+            if (gOWMCMfns.query_set_flags) gOWMCMfns.query_set_flags(q, flags);
+            if (gOWMCMfns.query_set_part) gOWMCMfns.query_set_part(q, part);
+
+            void *obj = gOWMCMfns.query_get_single ? gOWMCMfns.query_get_single(q) : NULL;
+            if (!obj) {
+                void *qerr = gOWMCMfns.query_get_error ? gOWMCMfns.query_get_error(q) : NULL;
+                if (qerr && gOWMCMfns.error_get_message) {
+                    const char *m = gOWMCMfns.error_get_message(qerr);
+                    if (m) lastErrorMsg = [NSString stringWithUTF8String:m];
+                }
+                OWQueryRelease(q);
+                continue;
+            }
+
+            void *oerr = NULL;
+            const char *path = gOWMCMfns.object_get_path
+                ? gOWMCMfns.object_get_path(obj, &oerr) : NULL;
+            const char *ident = gOWMCMfns.object_get_identifier
+                ? gOWMCMfns.object_get_identifier(obj, &oerr) : NULL;
+
+            BOOL activated = NO;
+            if (gOWMCMfns.object_sbx_activate) {
+                activated = gOWMCMfns.object_sbx_activate(obj);
+            }
+
+            NSString *token = nil;
+            if (gOWMCMfns.copy_sandbox_token) {
+                char *tok = gOWMCMfns.copy_sandbox_token(obj);
+                if (tok) {
+                    token = [NSString stringWithUTF8String:tok];
+                    free(tok);
+                }
+            }
+
+            if (path && path[0] == '/') {
+                NSString *p = [NSString stringWithUTF8String:path];
+                NSString *i2 = ident ? [NSString stringWithUTF8String:ident] : identifier;
+                if (token.length) {
+                    bestPath = p;
+                    bestIdent = i2;
+                    bestToken = token;
+                    bestActivated = activated;
+                    hitPart = part;
+                    hitFlags = flags;
+                    foundToken = YES;
+                } else if (!bestPath) {
+                    bestPath = p;
+                    bestIdent = i2;
+                    bestActivated = activated;
+                }
+            }
+            OWQueryRelease(q);
         }
-        if (error) *error = [self errorWithStatus:OWMCMStatusQueryFailed message:msg];
-        OWQueryRelease(q);
-        if (xid && gXPCRelease) gXPCRelease(xid);
+    }
+
+    if (xid && gXPCRelease) gXPCRelease(xid);
+
+    if (!bestPath) {
+        if (error) {
+            *error = [self errorWithStatus:OWMCMStatusQueryFailed
+                                   message:lastErrorMsg ?: @"定向查询未拿到路径"];
+        }
         return nil;
     }
 
-    void *oerr = NULL;
-    const char *path = gOWMCMfns.object_get_path
-        ? gOWMCMfns.object_get_path(obj, &oerr) : NULL;
-    const char *ident = gOWMCMfns.object_get_identifier
-        ? gOWMCMfns.object_get_identifier(obj, &oerr) : NULL;
-
-    // 工作包（星耀国际 v4）同款顺序：先激活 extension，再 copy token
-    BOOL activated = NO;
-    if (gOWMCMfns.object_sbx_activate) {
-        activated = gOWMCMfns.object_sbx_activate(obj);
-    }
-
-    NSString *token = nil;
-    if (gOWMCMfns.copy_sandbox_token) {
-        char *tok = gOWMCMfns.copy_sandbox_token(obj);
-        if (tok) {
-            token = [NSString stringWithUTF8String:tok];
-            free(tok);
-        }
-    }
-
-    OWMCMContainer *c = nil;
-    if (path && path[0] == '/') {
-        c = [OWMCMContainer new];
-        c.identifier = ident ? [NSString stringWithUTF8String:ident] : identifier;
-        c.path = [NSString stringWithUTF8String:path];
-        c.containerClass = cls;
-        c.sandboxToken = token;
-        c.extensionActivated = activated;
-        c.rawObject = NULL;
-        OWLog(@"OWMCM: 定向 %@ activate=%d token=%d",
-              c.identifier, activated, token.length > 0);
-    } else if (error) {
-        *error = [self errorWithStatus:OWMCMStatusPathNotAbsolute
-                               message:[NSString stringWithFormat:
-                                        @"定向查询 path 为空 id=%@", identifier]];
-    }
-
-    OWQueryRelease(q);
-    if (xid && gXPCRelease) gXPCRelease(xid);
+    OWMCMContainer *c = [OWMCMContainer new];
+    c.identifier = bestIdent ?: identifier;
+    c.path = bestPath;
+    c.containerClass = cls;
+    c.sandboxToken = bestToken;
+    c.extensionActivated = bestActivated;
+    c.rawObject = NULL;
+    OWLog(@"OWMCM: 定向 %@ token=%d part=%llu flags=0x%llx %@",
+          c.identifier, bestToken.length > 0,
+          (unsigned long long)hitPart, (unsigned long long)hitFlags,
+          foundToken ? @"（命中）" : @"（未命中，activated-only）");
     return c;
 }
 
