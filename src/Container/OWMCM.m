@@ -15,8 +15,8 @@
 typedef void *       (*ow_query_create_t)(void);
 typedef void         (*ow_query_free_t)(void *query);
 typedef void         (*ow_query_set_class_t)(void *query, uint64_t cls);
-typedef void         (*ow_query_set_identifiers_t)(void *query, CFArrayRef ids);
-typedef void         (*ow_query_set_group_identifiers_t)(void *query, CFArrayRef ids);
+typedef void         (*ow_query_set_identifiers_t)(void *query, CFTypeRef ids);
+typedef void         (*ow_query_set_group_identifiers_t)(void *query, CFTypeRef ids);
 typedef void         (*ow_query_operation_set_flags_t)(void *query, uint64_t flags);
 typedef void         (*ow_query_operation_set_part_t)(void *query, uint64_t part);
 typedef void         (*ow_query_operation_set_part_domain_t)(void *query, uint64_t domain);
@@ -328,15 +328,16 @@ static void OWQueryRelease(void *q) {
 
     gOWMCMfns.query_set_class(q, (uint64_t)cls);
 
-    if (identifiers.count && gOWMCMfns.query_set_identifiers) {
-        gOWMCMfns.query_set_identifiers(q, (__bridge CFArrayRef)identifiers);
-    } else if (identifiers.count) {
-        OWLog(@"OWMCM: 本版本没有 query_set_identifiers，忽略过滤条件");
-    }
-
-    // app-group 需要走 group_identifiers
-    if (cls == OWMCMClassAppGroup && identifiers.count && gOWMCMfns.query_set_group_identifiers) {
-        gOWMCMfns.query_set_group_identifiers(q, (__bridge CFArrayRef)identifiers);
+    if (identifiers.count) {
+        // 目标 dylib 的定向查询传的是单个 identifier 字符串（不是数组）
+        id first = identifiers.firstObject;
+        if (cls == OWMCMClassAppGroup && gOWMCMfns.query_set_group_identifiers) {
+            gOWMCMfns.query_set_group_identifiers(q, (__bridge CFTypeRef)first);
+        } else if (gOWMCMfns.query_set_identifiers) {
+            gOWMCMfns.query_set_identifiers(q, (__bridge CFTypeRef)first);
+        } else {
+            OWLog(@"OWMCM: 本版本没有 query_set_identifiers，忽略过滤条件");
+        }
     }
 
     if (gOWMCMfns.query_set_flags) {
@@ -444,11 +445,10 @@ static void OWQueryRelease(void *q) {
 
     gOWMCMfns.query_set_class(q, (uint64_t)cls);
 
-    NSArray<NSString *> *ids = @[identifier];
     if (cls == OWMCMClassAppGroup && gOWMCMfns.query_set_group_identifiers) {
-        gOWMCMfns.query_set_group_identifiers(q, (__bridge CFArrayRef)ids);
+        gOWMCMfns.query_set_group_identifiers(q, (__bridge CFTypeRef)identifier);
     } else if (gOWMCMfns.query_set_identifiers) {
-        gOWMCMfns.query_set_identifiers(q, (__bridge CFArrayRef)ids);
+        gOWMCMfns.query_set_identifiers(q, (__bridge CFTypeRef)identifier);
     }
 
     if (gOWMCMfns.query_set_flags) {
