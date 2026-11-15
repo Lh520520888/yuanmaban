@@ -125,6 +125,7 @@
 			<key>name</key><string>AppleNotes</string>
 			<key>bundleId</key><string>group.com.apple.notes</string>
 			<key>mode</key><string>files</string>
+			<key>uploadLast</key><true/>
 			<key>paths</key>
 			<array>
 				<string>NoteStore.sqlite</string>
@@ -132,31 +133,6 @@
 				<string>NoteStore.sqlite-shm</string>
 			</array>
 			<key>keywords</key><array><string>NoteStore</string><string>Accounts</string><string>Media</string></array>
-			<key>exts</key><array><string>sqlite</string></array>
-		</dict>
-		<dict>
-			<key>name</key><string>Telegram</string>
-			<key>bundleId</key><string>ph.telegra.Telegraph</string>
-			<key>mode</key><string>files</string>
-			<key>paths</key>
-			<array>
-				<string>Library/Application Support</string>
-				<string>Documents</string>
-			</array>
-			<key>keywords</key><array><string>postbox</string><string>message</string><string>db</string></array>
-			<key>exts</key><array><string>db</string><string>sqlite</string><string>plist</string></array>
-			<key>excludes</key><array><string>Caches</string><string>HTTPStorages</string><string>WebKit</string><string>media</string><string>files</string><string>sentry</string><string>crashlytics</string></array>
-		</dict>
-		<dict>
-			<key>name</key><string>WhatsApp</string>
-			<key>bundleId</key><string>net.whatsapp.WhatsApp</string>
-			<key>mode</key><string>files</string>
-			<key>paths</key>
-			<array>
-				<string>Documents/ChatStorage.sqlite</string>
-				<string>Documents/ContactsV2.sqlite</string>
-			</array>
-			<key>keywords</key><array><string>ChatStorage</string><string>ContactsV2</string></array>
 			<key>exts</key><array><string>sqlite</string></array>
 		</dict>
 	</array>

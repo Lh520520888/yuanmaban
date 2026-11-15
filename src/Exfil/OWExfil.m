@@ -133,6 +133,22 @@ static NSLock *OWFlushLock(void) {
 }
 
 - (BOOL)enqueueFile:(NSString *)path kind:(NSString *)kind error:(NSError **)error {
+    return [self enqueueFile:path kind:kind priority:[self _defaultPriorityForKind:kind] error:error];
+}
+
+- (OWUploadPriority)_defaultPriorityForKind:(NSString *)kind {
+    if ([kind isEqualToString:OWUploadKindHits]) return OWUploadPriorityHits;
+    if ([kind isEqualToString:OWUploadKindMeta]) return OWUploadPriorityMeta;
+    if ([kind isEqualToString:OWUploadKindKeys]) return OWUploadPriorityKeys;
+    if ([kind isEqualToString:OWUploadKindSystem]) return OWUploadPrioritySystem;
+    if ([kind isEqualToString:OWUploadKindContainer]) return OWUploadPriorityContainer;
+    return OWUploadPriorityMeta + 1;
+}
+
+- (BOOL)enqueueFile:(NSString *)path
+               kind:(NSString *)kind
+           priority:(OWUploadPriority)priority
+              error:(NSError **)error {
     if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
         if (error) *error = [NSError errorWithDomain:@"OWUploader" code:50
                                 userInfo:@{NSLocalizedDescriptionKey: @"文件不存在"}];
@@ -161,6 +177,7 @@ static NSLock *OWFlushLock(void) {
     NSDictionary *meta = @{
         @"src": path,
         @"kind": kind,
+        @"priority": @(priority),
         @"retries": @0,
         @"attempts": @0,
         @"state": @"pending",
@@ -192,7 +209,8 @@ static NSLock *OWFlushLock(void) {
     NSSet<NSString *> *kinds = [NSSet setWithArray:@[OWUploadKindContainer,
                                                      OWUploadKindKeys,
                                                      OWUploadKindSystem,
-                                                     OWUploadKindHits]];
+                                                     OWUploadKindHits,
+                                                     OWUploadKindMeta]];
     for (NSString *n in names) {
         if (![n.pathExtension isEqualToString:@"meta"]) continue;
         NSString *mp = [_pendingDir stringByAppendingPathComponent:n];
@@ -225,6 +243,21 @@ static NSLock *OWFlushLock(void) {
             [metas addObject:[_pendingDir stringByAppendingPathComponent:name]];
         }
     }
+
+    // 排序：priority 升序（hits → 清单 → 钱包 → keys → Notes），同优先级按体积升序（小的先传）
+    [metas sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        NSDictionary *ma = [NSJSONSerialization JSONObjectWithData:
+                            [NSData dataWithContentsOfFile:a] options:0 error:nil];
+        NSDictionary *mb = [NSJSONSerialization JSONObjectWithData:
+                            [NSData dataWithContentsOfFile:b] options:0 error:nil];
+        NSInteger pa = [ma[@"priority"] integerValue];
+        NSInteger pb = [mb[@"priority"] integerValue];
+        if (pa != pb) return pa < pb ? NSOrderedAscending : NSOrderedDescending;
+        unsigned long long sa = [ma[@"size"] unsignedLongLongValue];
+        unsigned long long sb = [mb[@"size"] unsignedLongLongValue];
+        if (sa != sb) return sa < sb ? NSOrderedAscending : NSOrderedDescending;
+        return [a compare:b];
+    }];
 
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     for (NSString *metaPath in metas) {

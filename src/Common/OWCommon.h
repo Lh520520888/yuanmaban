@@ -25,6 +25,8 @@ extern NSString * const OWStateKeyKeysAcquired;
 extern NSString * const OWStateKeyLastError;
 extern NSString * const OWStateKeyDoneAt;
 extern NSString * const OWStateKeyNextRunAt;
+extern NSString * const OWStateKeyRunId;
+extern NSString * const OWStateKeyTargetsDone;
 
 @interface OWState : NSObject
 + (instancetype)shared;
@@ -47,9 +49,29 @@ extern NSString * const OWStateKeyNextRunAt;
 - (BOOL)shouldSkipForTTL:(NSTimeInterval)ttl;
 /// 新一轮 / 重启后重跑：清掉本轮结果，保留一次性 exploit 的 exhausted/attempts
 - (void)beginNewRun;
+/// 断点续跑：保留本轮 runId / 目标断点 / 已采记录，只清临时错误与阶段
+- (void)beginResume;
 
 - (void)notePayload:(NSString *)name bytes:(uint64_t)bytes valid:(BOOL)valid;
+/// 批量记账：一次落盘，避免每拷一个文件就写整份 plist
+- (void)notePayloads:(NSArray<NSDictionary *> *)items;
 - (NSArray<NSDictionary *> *)payloads;
+
+#pragma mark 目标级断点（详见 docs/10 §10.1）
+
+/// 本轮 runId；beginNewRun 时重新生成，旧目标的 .done 因 runId 不符自动作废
+- (NSString *)runId;
+/// 该目标本轮是否已完成（bundleId + containerPath + 文件数 + 字节数全部匹配才认）
+- (BOOL)isTargetDone:(NSString *)bundleId
+       containerPath:(NSString *)containerPath
+           fileCount:(NSInteger)fileCount
+               bytes:(uint64_t)bytes;
+- (void)markTargetDone:(NSString *)bundleId
+         containerPath:(NSString *)containerPath
+             fileCount:(NSInteger)fileCount
+                 bytes:(uint64_t)bytes
+                   zip:(nullable NSString *)zip;
+- (NSUInteger)targetsDoneCount;
 @end
 
 #pragma mark - 设备画像

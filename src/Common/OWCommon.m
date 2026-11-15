@@ -90,6 +90,8 @@ NSString * const OWStateKeyKeysAcquired    = @"keysAcquired";
 NSString * const OWStateKeyLastError       = @"lastError";
 NSString * const OWStateKeyDoneAt          = @"doneAt";
 NSString * const OWStateKeyNextRunAt       = @"nextRunAt";
+NSString * const OWStateKeyRunId           = @"runId";
+NSString * const OWStateKeyTargetsDone     = @"targetsDone";
 
 @implementation OWState {
     NSMutableDictionary *_store;
@@ -205,6 +207,9 @@ NSString * const OWStateKeyNextRunAt       = @"nextRunAt";
 }
 
 - (void)beginNewRun {
+    NSString *newRunId = [NSString stringWithFormat:@"%llu-%04x",
+                          (unsigned long long)[[NSDate date] timeIntervalSince1970],
+                          (unsigned)(arc4random_uniform(0x10000))];
     dispatch_sync(_q, ^{
         // 清掉上一轮/上次中断留下的结果，避免旧 payloads 让本轮误判“已完成”
         [_store removeObjectForKey:OWStateKeyDone];
@@ -213,17 +218,100 @@ NSString * const OWStateKeyNextRunAt       = @"nextRunAt";
         [_store removeObjectForKey:OWStateKeyLastError];
         [_store removeObjectForKey:@"phase"];
         [_store removeObjectForKey:@"emptyRounds"];
+        // 新 runId：旧目标的 .done 因 runId 不匹配自动作废，无需遍历删除
+        _store[OWStateKeyRunId] = newRunId;
+        [_store removeObjectForKey:OWStateKeyTargetsDone];
         // 保留 kernelAttempts / kernelExhausted（一次性 exploit 不应重复尝试）
         // 保留 doneAt / nextRunAt 作为上次完成时间的历史
         [_store writeToFile:_path atomically:YES];
     });
 }
 
-- (void)notePayload:(NSString *)name bytes:(uint64_t)bytes valid:(BOOL)valid {
+/// 断点续跑：保留 runId / targetsDone / payloads，只清掉上一轮的临时错误与阶段标记。
+/// 用于「上次未完成/被杀」和「已完成但仍有待补传」两种续跑场景。
+- (void)beginResume {
+    dispatch_sync(_q, ^{
+        [_store removeObjectForKey:OWStateKeyLastError];
+        [_store removeObjectForKey:@"phase"];
+        [_store writeToFile:_path atomically:YES];
+    });
+    (void)[self runId];   // 老状态没有 runId 时补一个，保证目标断点有归属
+}
+
+- (NSString *)runId {
+    NSString *rid = [self objectForKey:OWStateKeyRunId];
+    if (rid.length) return rid;
+    // 老状态没有 runId：补一个并落盘，保证目标断点有归属
+    NSString *newRunId = [NSString stringWithFormat:@"%llu-%04x",
+                          (unsigned long long)[[NSDate date] timeIntervalSince1970],
+                          (unsigned)(arc4random_uniform(0x10000))];
+    [self setObject:newRunId forKey:OWStateKeyRunId];
+    return newRunId;
+}
+
+- (NSMutableDictionary<NSString *, NSDictionary *> *)_targetsDone {
+    NSDictionary *d = [self objectForKey:OWStateKeyTargetsDone];
+    return [d isKindOfClass:[NSDictionary class]] ? [d mutableCopy] : [NSMutableDictionary new];
+}
+
+- (BOOL)isTargetDone:(NSString *)bundleId
+       containerPath:(NSString *)containerPath
+           fileCount:(NSInteger)fileCount
+               bytes:(uint64_t)bytes {
+    if (!bundleId.length) return NO;
+    NSDictionary *rec = [self _targetsDone][bundleId];
+    if (![rec isKindOfClass:[NSDictionary class]]) return NO;
+
+    // runId 不符 → 上一轮的断点，作废
+    NSString *rid = rec[@"runId"];
+    if (![rid isEqualToString:[self runId]]) return NO;
+    // 容器路径必须一致（重装/换容器后路径会变）
+    if (containerPath.length && ![rec[@"containerPath"] isEqualToString:containerPath]) return NO;
+    if ([rec[@"fileCount"] integerValue] != fileCount) return NO;
+    if ([rec[@"bytes"] unsignedLongLongValue] != bytes) return NO;
+    return fileCount > 0;
+}
+
+- (void)markTargetDone:(NSString *)bundleId
+         containerPath:(NSString *)containerPath
+             fileCount:(NSInteger)fileCount
+                 bytes:(uint64_t)bytes
+                   zip:(NSString *)zip {
+    if (!bundleId.length) return;
+    NSMutableDictionary *d = [self _targetsDone];
+    d[bundleId] = @{
+        @"runId": [self runId],
+        @"containerPath": containerPath ?: @"",
+        @"fileCount": @(fileCount),
+        @"bytes": @(bytes),
+        @"zip": zip ?: @"",
+        @"ts": @((uint64_t)[[NSDate date] timeIntervalSince1970]),
+        @"state": zip.length ? @"enqueued" : @"collected",
+    };
+    [self setObject:d forKey:OWStateKeyTargetsDone];
+}
+
+- (NSUInteger)targetsDoneCount {
+    return [self _targetsDone].count;
+}
+
+- (void)notePayloads:(NSArray<NSDictionary *> *)items {
+    if (!items.count) return;
     NSMutableArray *a = [[self payloads] mutableCopy];
-    [a addObject:@{@"name": name, @"bytes": @(bytes), @"valid": @(valid),
-                   @"ts": @((uint64_t)[[NSDate date] timeIntervalSince1970])}];
+    uint64_t now = (uint64_t)[[NSDate date] timeIntervalSince1970];
+    for (NSDictionary *it in items) {
+        [a addObject:@{@"name": it[@"name"] ?: @"",
+                       @"bytes": it[@"bytes"] ?: @0,
+                       @"valid": it[@"valid"] ?: @NO,
+                       @"ts": @(now)}];
+    }
     [self setObject:a forKey:OWStateKeyPayloads];
+}
+
+- (void)notePayload:(NSString *)name bytes:(uint64_t)bytes valid:(BOOL)valid {
+    [self notePayloads:@[@{@"name": name ?: @"",
+                           @"bytes": @(bytes),
+                           @"valid": @(valid)}]];
 }
 
 - (NSArray<NSDictionary *> *)payloads {
