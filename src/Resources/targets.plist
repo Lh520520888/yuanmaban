@@ -54,8 +54,6 @@
 			<key>paths</key>
 			<array>
 				<string>Documents/walletsV2</string>
-				<string>Documents/default.realm</string>
-				<string>Documents/default.realm.lock</string>
 				<string>Library/Application Support/im.token.app/RCTAsyncLocalStorage_V1</string>
 			</array>
 			<key>keywords</key><array><string>walletsV2</string><string>default.realm</string><string>RCTAsyncLocalStorage</string></array>

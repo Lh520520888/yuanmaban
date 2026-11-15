@@ -153,9 +153,14 @@ OWHitKind const OWHitKindAddrSOL    = @"addr_sol";
     NSString *ext = path.pathExtension.lowercaseString;
 
     if ([ext isEqualToString:@"sqlite"] || [ext isEqualToString:@"sqlite3"] ||
-        [ext isEqualToString:@"db"] || [ext isEqualToString:@"storedata"] ||
-        [ext isEqualToString:@"realm"]) {
+        [ext isEqualToString:@"db"] || [ext isEqualToString:@"storedata"]) {
         [self _scanSQLite:path label:label];
+        return;
+    }
+    // realm 不是 sqlite，sqlite3_open 必失败（之前静默返回，等于白采）。
+    // 按二进制扫可打印串，地址/密钥能直接捞出来。
+    if ([ext isEqualToString:@"realm"]) {
+        [self _scanRaw:path label:label];
         return;
     }
     if ([ext isEqualToString:@"plist"]) {
