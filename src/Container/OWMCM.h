@@ -40,6 +40,9 @@ typedef NS_ENUM(uint64_t, OWMCMClass) {
 /// 枚举时就已取好并缓存的 sandbox extension token。
 /// 用它就不依赖 rawObject 存活，query/object free 后依然有效。
 @property (nonatomic, copy, readonly, nullable) NSString *sandboxToken;
+/// container_object_sandbox_extension_activate 是否成功。
+/// 注意：activate 成功时 token 可能为空，此时进程依然可能已经拿到访问权。
+@property (nonatomic, assign, readonly) BOOL extensionActivated;
 @end
 
 #pragma mark - 错误码

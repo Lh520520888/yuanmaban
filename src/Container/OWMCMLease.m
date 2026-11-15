@@ -175,6 +175,22 @@ static const char * const kOWSbxLibPaths[] = {
         if ([tokenObj isKindOfClass:[NSString class]]) token = tokenObj;
     }
     if (!token.length) {
+        // 工作包同款：activate 成功但 token 为空时，extension 可能已经生效，
+        // 此时仍允许继续读；真正的 EPERM 会在读文件时暴露。
+        if (container.extensionActivated) {
+            OWLog(@"OWLease: 无 token 但 extension 已激活，按可读处理 id=%@",
+                  container.identifier);
+            os_unfair_lock_lock(&_lock);
+            OWMCMLeaseRecord *r = [OWMCMLeaseRecord new];
+            r.path = container.path;
+            r.identifier = container.identifier;
+            r.handle = 0;
+            r.seq = ++_counter;
+            [_records addObject:r];
+            os_unfair_lock_unlock(&_lock);
+            if (reason) *reason = @"activated-only";
+            return YES;
+        }
         if (reason) *reason = [NSString stringWithFormat:@"[%d] MCM object contained no sandbox token",
                                (int)OWMCMStatusNoSandboxToken];
         OWLog(@"OWLease: [%d] %@ 无 token（id=%@）",

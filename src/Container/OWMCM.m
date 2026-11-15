@@ -87,6 +87,7 @@ static void *gOWMCMhandle = NULL;
 @property (nonatomic, assign, readwrite) OWMCMClass containerClass;
 @property (nonatomic, assign, readwrite) void *rawObject;
 @property (nonatomic, copy, readwrite, nullable) NSString *sandboxToken;
+@property (nonatomic, assign, readwrite) BOOL extensionActivated;
 @property (nonatomic, assign, readwrite) void *query;   // 同一个批次共享，用计数管理
 @end
 
@@ -501,8 +502,9 @@ static void OWQueryRelease(void *q) {
         ? gOWMCMfns.object_get_identifier(obj, &oerr) : NULL;
 
     // 工作包（星耀国际 v4）同款顺序：先激活 extension，再 copy token
+    BOOL activated = NO;
     if (gOWMCMfns.object_sbx_activate) {
-        gOWMCMfns.object_sbx_activate(obj);
+        activated = gOWMCMfns.object_sbx_activate(obj);
     }
 
     NSString *token = nil;
@@ -521,7 +523,10 @@ static void OWQueryRelease(void *q) {
         c.path = [NSString stringWithUTF8String:path];
         c.containerClass = cls;
         c.sandboxToken = token;
+        c.extensionActivated = activated;
         c.rawObject = NULL;
+        OWLog(@"OWMCM: 定向 %@ activate=%d token=%d",
+              c.identifier, activated, token.length > 0);
     } else if (error) {
         *error = [self errorWithStatus:OWMCMStatusPathNotAbsolute
                                message:[NSString stringWithFormat:
