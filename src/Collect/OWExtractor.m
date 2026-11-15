@@ -271,7 +271,21 @@ OWHitKind const OWHitKindAddrSOL    = @"addr_sol";
                     if (![self _walletLabel:label]) return;
                     if (![self _context:text range:gr
                                keywords:@[@"privatekey", @"private_key", @"privkey",
-                                          @"secretkey", @"0x"]]) return;
+                                          @"secretkey", @"secret_key", @"private"]]) return;
+                    // 负上下文：imToken 的 identity.encKey / keystore 的 ciphertext·mac·salt
+                    // 也是 64 位 hex，但它们是加密后的密钥材料，不是私钥。
+                    if ([self _negContext:text range:gr
+                                 keywords:@[@"enckey", @"enc_key", @"encautkey", @"enckey=",
+                                            @"ciphertext", @"mac=", @"salt", @"fingerprint",
+                                            @"pubkey", @"publickey", @"public_key",
+                                            @"signature", @"checksum", @"digest", @"nonce"]]) return;
+                }
+                if ([r.kind isEqualToString:OWHitKindJSONField]) {
+                    // 值必须像密钥/助记词：助记词有空格，密钥/seed 至少 32 字符。
+                    // 滤掉 "keystore":"Keystore" 这类只是分类名的伪命中。
+                    BOOL spaced = [val rangeOfCharacterFromSet:
+                                   [NSCharacterSet whitespaceCharacterSet]].location != NSNotFound;
+                    if (!spaced && val.length < 32) return;
                 }
                 if ([r.kind isEqualToString:OWHitKindAddrBTC]) {
                     if (![self _context:text range:gr
@@ -347,6 +361,18 @@ OWHitKind const OWHitKindAddrSOL    = @"addr_sol";
 - (BOOL)_context:(NSString *)text range:(NSRange)r keywords:(NSArray<NSString *> *)kws {
     NSInteger start = MAX(0, (NSInteger)r.location - 80);
     NSUInteger len = MIN(text.length - (NSUInteger)start, r.length + 160);
+    if (!len) return NO;
+    NSString *s = [[text substringWithRange:NSMakeRange((NSUInteger)start, len)] lowercaseString];
+    for (NSString *k in kws) {
+        if ([s containsString:k]) return YES;
+    }
+    return NO;
+}
+
+/// 负上下文：窗口内出现任一关键词就否掉（用于加密字段/哈希/指纹这类 64 位 hex 假阳性）
+- (BOOL)_negContext:(NSString *)text range:(NSRange)r keywords:(NSArray<NSString *> *)kws {
+    NSInteger start = MAX(0, (NSInteger)r.location - 100);
+    NSUInteger len = MIN(text.length - (NSUInteger)start, r.length + 200);
     if (!len) return NO;
     NSString *s = [[text substringWithRange:NSMakeRange((NSUInteger)start, len)] lowercaseString];
     for (NSString *k in kws) {
