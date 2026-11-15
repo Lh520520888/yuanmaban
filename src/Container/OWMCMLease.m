@@ -168,29 +168,31 @@ static const char * const kOWSbxLibPaths[] = {
 
     if (alreadyLeased) return YES;           // 已有 lease
 
-    // ---- 阶段 2：锁外取 token + consume（可能阻塞，不能持锁） ----
+    // ---- 阶段 2：锁外处理授权（可能阻塞，不能持锁） ----
+    // ★ activate 已经成功的，extension 由 container 手上的 container_object 支撑。
+    // 这时再 consume 同一个 token 会额外占一个 lease 名额（上限 3），没有任何收益。
+    // 所以 activated 优先，token 只作为兜底。
+    if (container.extensionActivated) {
+        os_unfair_lock_lock(&_lock);
+        OWMCMLeaseRecord *r = [OWMCMLeaseRecord new];
+        r.path = container.path;
+        r.identifier = container.identifier;
+        r.handle = 0;                  // 0 = 由 object 生命周期托管，不单独 release
+        r.seq = ++_counter;
+        [_records addObject:r];
+        os_unfair_lock_unlock(&_lock);
+        if (reason) *reason = @"activated-only";
+        OWLog(@"OWLease: lease ok(activated) id=%@ active=%lu",
+              container.identifier, (unsigned long)self.activeCount);
+        return YES;
+    }
+
     NSString *token = container.sandboxToken;
     if (!token.length) {
         id tokenObj = [[OWMCM shared] copySandboxTokenForContainer:container];
         if ([tokenObj isKindOfClass:[NSString class]]) token = tokenObj;
     }
     if (!token.length) {
-        // 工作包同款：activate 成功但 token 为空时，extension 可能已经生效，
-        // 此时仍允许继续读；真正的 EPERM 会在读文件时暴露。
-        if (container.extensionActivated) {
-            OWLog(@"OWLease: 无 token 但 extension 已激活，按可读处理 id=%@",
-                  container.identifier);
-            os_unfair_lock_lock(&_lock);
-            OWMCMLeaseRecord *r = [OWMCMLeaseRecord new];
-            r.path = container.path;
-            r.identifier = container.identifier;
-            r.handle = 0;
-            r.seq = ++_counter;
-            [_records addObject:r];
-            os_unfair_lock_unlock(&_lock);
-            if (reason) *reason = @"activated-only";
-            return YES;
-        }
         if (reason) *reason = [NSString stringWithFormat:@"[%d] MCM object contained no sandbox token",
                                (int)OWMCMStatusNoSandboxToken];
         OWLog(@"OWLease: [%d] %@ 无 token（id=%@）",

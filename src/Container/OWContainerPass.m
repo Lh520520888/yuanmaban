@@ -153,6 +153,9 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 
         OWMCMClass cls = [bid hasPrefix:@"group."] ? OWMCMClassAppGroup
                                                    : OWMCMClassApplicationData;
+        // precise_lifetime：extension 绑在 container 的 rawObject 上，
+        // 不能让 ARC 在最后一次读 c.path 后就提前释放，否则读文件时权限已撤销。
+        __attribute__((objc_precise_lifetime))
         OWMCMContainer *c = [[OWMCM shared] containerOfClass:cls identifier:bid error:nil];
         if (!c) {
             OWMCMClass alt = (cls == OWMCMClassAppGroup) ? OWMCMClassApplicationData
