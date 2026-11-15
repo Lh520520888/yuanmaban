@@ -474,6 +474,11 @@ static void OWQueryRelease(void *q) {
     const char *ident = gOWMCMfns.object_get_identifier
         ? gOWMCMfns.object_get_identifier(obj, &oerr) : NULL;
 
+    // 工作包（星耀国际 v4）同款顺序：先激活 extension，再 copy token
+    if (gOWMCMfns.object_sbx_activate) {
+        gOWMCMfns.object_sbx_activate(obj);
+    }
+
     NSString *token = nil;
     if (gOWMCMfns.copy_sandbox_token) {
         char *tok = gOWMCMfns.copy_sandbox_token(obj);

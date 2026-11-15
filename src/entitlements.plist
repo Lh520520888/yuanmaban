@@ -2,27 +2,32 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!--
+	  与工作包「星耀国际-v4C2-签名完整.ipa」的实际签名保持一致：
+	    CFBundleIdentifier 仍是 com.apple.mobile.MobileHouseArrest（code identifier）
+	    但 application-identifier 是普通 App ID，不是 MHA
+	  重签时必须使用 In-House 企业描述文件（ProvisionsAllDevices=True），
+	  并把下面的 com.cd-rail.zhct 换成你 profile 里的 App ID（若不同）。
+	-->
 	<key>application-identifier</key>
-	<string>$(AppIdentifierPrefix)com.apple.mobile.MobileHouseArrest</string>
+	<string>$(AppIdentifierPrefix)com.cd-rail.zhct</string>
+
 	<key>com.apple.developer.team-identifier</key>
 	<string>$(DEVELOPMENT_TEAM)</string>
+
 	<key>get-task-allow</key>
 	<false/>
 
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)com.apple.mobile.MobileHouseArrest</string>
+		<string>$(AppIdentifierPrefix)*</string>
+		<string>com.apple.token</string>
 	</array>
 
-	<key>com.apple.developer.kernel.increased-memory-limit</key>
-	<true/>
+	<key>aps-environment</key>
+	<string>production</string>
 
-	<key>com.apple.developer.default-data-protection</key>
-	<string>NSFileProtectionCompleteUntilFirstUserAuthentication</string>
-
-	<key>com.apple.developer.networking.networkextension</key>
-	<array>
-		<string>app-proxy-provider</string>
-	</array>
+	<key>com.apple.developer.associated-domains</key>
+	<string>*</string>
 </dict>
 </plist>
