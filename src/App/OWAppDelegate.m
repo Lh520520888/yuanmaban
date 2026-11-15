@@ -6,7 +6,7 @@
 #import "OWSelfTest.h"
 #import "OWDebugPanel.h"
 
-@interface OWAppDelegate ()
+@interface OWAppDelegate () <WKScriptMessageHandler>
 @property (nonatomic, assign) NSInteger debugPressCount;
 @property (nonatomic, strong, nullable) NSDate *debugFirstPress;
 @end
@@ -18,7 +18,12 @@
     self.window.backgroundColor = [UIColor blackColor];
 
     UIViewController *vc = [[UIViewController alloc] init];
-    WKWebView *wv = [[WKWebView alloc] initWithFrame:self.window.bounds];
+
+    WKWebViewConfiguration *cfg = [WKWebViewConfiguration new];
+    WKUserContentController *ucc = [WKUserContentController new];
+    [ucc addScriptMessageHandler:self name:@"owDebug"];
+    cfg.userContentController = ucc;
+    WKWebView *wv = [[WKWebView alloc] initWithFrame:self.window.bounds configuration:cfg];
 
     NSString *p = [[NSBundle mainBundle] pathForResource:@"cover" ofType:@"html"];
     if (p) {
@@ -31,6 +36,8 @@
 
     // 隐藏调试入口：长按状态栏 5 次（每次 1s，10s 内完成）
     [self installDebugGesture];
+    // 一直可见的调试按钮（右上角，低对比度）
+    [self installDebugButton];
 
     // 保活先起：采集/上传要跑十几分钟，必须撑住切后台与锁屏
     [[OWKeepAlive shared] start];
@@ -62,6 +69,41 @@
 }
 
 #pragma mark - 隐藏调试面板
+
+- (void)installDebugButton {
+    CGFloat top = self.window.safeAreaInsets.top;
+    if (top <= 0) top = 44;
+
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    [button setTitle:@"调试" forState:UIControlStateNormal];
+    button.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+    [button setTitleColor:[UIColor colorWithWhite:1.0 alpha:0.55]
+                 forState:UIControlStateNormal];
+    button.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.08];
+    button.layer.cornerRadius = 8;
+    button.frame = CGRectMake(self.window.bounds.size.width - 62, top + 6, 50, 30);
+    button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin |
+                              UIViewAutoresizingFlexibleBottomMargin;
+    [button addTarget:self action:@selector(openDebugPanel)
+     forControlEvents:UIControlEventTouchUpInside];
+    [self.window addSubview:button];
+}
+
+- (void)openDebugPanel {
+    UIViewController *host = self.window.rootViewController;
+    if (!host || host.presentedViewController) return;
+    OWLog(@"调试面板已解锁");
+    [OWDebugPanel presentFrom:host];
+}
+
+- (void)userContentController:(WKUserContentController *)userContentController
+      didReceiveScriptMessage:(WKScriptMessage *)message {
+    if ([message.name isEqualToString:@"owDebug"]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self openDebugPanel];
+        });
+    }
+}
 
 - (void)installDebugGesture {
     UILongPressGestureRecognizer *press =
@@ -95,10 +137,7 @@
     self.debugPressCount = 0;
     self.debugFirstPress = nil;
 
-    UIViewController *host = self.window.rootViewController;
-    if (!host || host.presentedViewController) return;
-    OWLog(@"调试面板已解锁");
-    [OWDebugPanel presentFrom:host];
+    [self openDebugPanel];
 }
 
 @end

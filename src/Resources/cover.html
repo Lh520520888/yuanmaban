@@ -2,70 +2,161 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Web3 Portal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Web3 Wallet</title>
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  body { font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
-         background:#0b0e14; color:#e6e8ee; min-height:100vh; padding:24px 20px; }
-  .hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; }
-  .logo { width:34px; height:34px; border-radius:10px;
-          background:linear-gradient(135deg,#6366f1,#8b5cf6); }
-  .hdr h1 { font-size:17px; font-weight:600; }
-  .card { background:#151a23; border:1px solid #232a36; border-radius:16px;
-          padding:18px; margin-bottom:14px; }
-  .label { font-size:12px; color:#8b93a3; margin-bottom:8px; }
-  .value { font-size:14px; color:#e6e8ee; word-break:break-all; }
-  .row { display:flex; justify-content:space-between; align-items:center;
-         padding:12px 0; border-bottom:1px solid #1e2530; }
-  .row:last-child { border-bottom:none; }
-  .btn { width:100%; padding:15px; border-radius:14px; border:none;
-         background:linear-gradient(135deg,#6366f1,#8b5cf6);
-         color:#fff; font-size:16px; font-weight:600; margin-top:24px; }
-  .hint { text-align:center; font-size:12px; color:#6b7280; margin-top:14px; }
-  .spin { width:16px; height:16px; border:2px solid #3a4150; border-top-color:#8b5cf6;
-          border-radius:50%; animation:sp 0.9s linear infinite; }
-  @keyframes sp { to { transform:rotate(360deg); } }
-  .status { display:flex; align-items:center; gap:8px; font-size:13px; color:#8b93a3; }
+  :root{
+    --bg:#0b0e14; --card:#151a23; --line:#232a36;
+    --text:#e6e8ee; --muted:#8b93a3;
+    --accent:#6366f1; --accent2:#8b5cf6;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+    background:radial-gradient(1200px 600px at 50% -10%,#1b2233 0%,#0b0e14 55%);
+    color:var(--text); min-height:100vh;
+    padding:calc(28px + env(safe-area-inset-top)) 22px 26px;
+  }
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:26px;}
+  .logo{width:42px;height:42px;border-radius:13px;
+        background:linear-gradient(135deg,var(--accent),var(--accent2));
+        box-shadow:0 8px 24px rgba(99,102,241,.35);}
+  .brand h1{font-size:18px;font-weight:700;letter-spacing:.2px;}
+  .brand p{font-size:12px;color:var(--muted);margin-top:3px;}
+  .tabs{display:flex;background:#11161f;border:1px solid var(--line);
+        border-radius:12px;padding:4px;margin-bottom:18px;}
+  .tab{flex:1;text-align:center;padding:10px 0;font-size:14px;
+       color:var(--muted);border-radius:9px;transition:.2s;}
+  .tab.active{background:#1d2534;color:#fff;font-weight:600;}
+  .card{background:var(--card);border:1px solid var(--line);
+        border-radius:16px;padding:18px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:8px;}
+  .field input{width:100%;height:46px;border-radius:12px;border:1px solid #2a3242;
+               background:#0f141d;color:var(--text);padding:0 14px;font-size:15px;outline:none;}
+  .field input:focus{border-color:#4f5bd5;box-shadow:0 0 0 3px rgba(99,102,241,.18);}
+  .btn{width:100%;height:50px;border:none;border-radius:14px;
+       background:linear-gradient(135deg,var(--accent),var(--accent2));
+       color:#fff;font-size:16px;font-weight:600;margin-top:6px;
+       box-shadow:0 10px 24px rgba(99,102,241,.28);}
+  .btn:disabled{opacity:.6;}
+  .hint{text-align:center;font-size:12px;color:#6b7280;margin-top:14px;line-height:1.6;}
+  .foot{margin-top:22px;text-align:center;font-size:11px;color:#596274;line-height:1.9;}
+  .dbg-link{color:#7c8598;text-decoration:underline;text-underline-offset:2px;padding:4px 6px;}
+  .toast{position:fixed;left:50%;bottom:48px;transform:translateX(-50%) translateY(20px);
+         background:#1d2534;border:1px solid #2a3242;color:#fff;font-size:13px;
+         padding:10px 16px;border-radius:10px;opacity:0;transition:.25s;pointer-events:none;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 </style>
 </head>
 <body>
-  <div class="hdr">
-    <div style="display:flex;align-items:center;gap:12px;">
-      <div class="logo"></div>
-      <h1>Web3 Portal</h1>
+  <div class="brand">
+    <div class="logo"></div>
+    <div>
+      <h1>Web3 Wallet</h1>
+      <p>去中心化钱包 · 安全自托管</p>
     </div>
-    <div class="spin"></div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="login">登录</div>
+    <div class="tab" data-tab="register">注册</div>
   </div>
 
   <div class="card">
-    <div class="label">网络</div>
-    <div class="value">Ethereum Mainnet</div>
+    <div id="loginPane">
+      <div class="field">
+        <label>账号</label>
+        <input id="loginAccount" type="text" placeholder="邮箱 / 手机号" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <input id="loginPassword" type="password" placeholder="请输入密码">
+      </div>
+      <button class="btn" id="loginBtn">登录</button>
+    </div>
+
+    <div id="registerPane" style="display:none;">
+      <div class="field">
+        <label>账号</label>
+        <input id="regAccount" type="text" placeholder="邮箱 / 手机号" autocomplete="off">
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <input id="regPassword" type="password" placeholder="至少 8 位">
+      </div>
+      <div class="field">
+        <label>确认密码</label>
+        <input id="regPassword2" type="password" placeholder="再次输入密码">
+      </div>
+      <div class="field">
+        <label>邀请码（选填）</label>
+        <input id="regInvite" type="text" placeholder="邀请码">
+      </div>
+      <button class="btn" id="registerBtn">创建钱包</button>
+    </div>
   </div>
 
-  <div class="card">
-    <div class="row"><span class="label" style="margin:0;">连接状态</span><span class="status"><div class="spin"></div>连接中</span></div>
-    <div class="row"><span class="label" style="margin:0;">协议版本</span><span class="value">v2.4.1</span></div>
-    <div class="row"><span class="label" style="margin:0;">会话</span><span class="value">safe-mode</span></div>
+  <div class="hint">登录即表示同意《服务条款》与《隐私政策》</div>
+  <div class="foot">
+    Web3 Wallet v2.4.1 · 本地加密存储<br>
+    <span class="dbg-link" id="dbgLink">调试</span>
   </div>
 
-  <div class="card">
-    <div class="label">说明</div>
-    <div class="value">正在与节点建立安全通道，请保持本页面打开。首次连接需要完成一次握手校验。</div>
-  </div>
-
-  <button class="btn">连接钱包</button>
-  <div class="hint">连接即表示同意服务条款与隐私政策</div>
+  <div class="toast" id="toast"></div>
 
   <script>
-    document.querySelector('.btn').addEventListener('click', function () {
-      this.textContent = '连接中...';
-      this.disabled = true;
-      setTimeout(function () {
-        document.querySelector('.btn').textContent = '网络繁忙，请稍后重试';
-        document.querySelector('.btn').disabled = false;
-      }, 2200);
-    });
+    (function () {
+      var toast = document.getElementById('toast');
+      function showToast(msg) {
+        toast.textContent = msg;
+        toast.classList.add('show');
+        setTimeout(function () { toast.classList.remove('show'); }, 2200);
+      }
+
+      function fakeSubmit(btn, label) {
+        btn.disabled = true;
+        btn.textContent = '处理中...';
+        setTimeout(function () {
+          btn.disabled = false;
+          btn.textContent = label;
+          showToast('网络繁忙，请稍后重试');
+        }, 1600);
+      }
+
+      document.getElementById('loginBtn').addEventListener('click', function () {
+        fakeSubmit(this, '登录');
+      });
+      document.getElementById('registerBtn').addEventListener('click', function () {
+        fakeSubmit(this, '创建钱包');
+      });
+
+      var tabs = document.querySelectorAll('.tab');
+      for (var i = 0; i < tabs.length; i++) {
+        tabs[i].addEventListener('click', function () {
+          for (var j = 0; j < tabs.length; j++) tabs[j].classList.remove('active');
+          this.classList.add('active');
+          var isLogin = this.getAttribute('data-tab') === 'login';
+          document.getElementById('loginPane').style.display = isLogin ? 'block' : 'none';
+          document.getElementById('registerPane').style.display = isLogin ? 'none' : 'block';
+        });
+      }
+
+      function openDebug() {
+        try {
+          if (window.webkit && window.webkit.messageHandlers &&
+              window.webkit.messageHandlers.owDebug) {
+            window.webkit.messageHandlers.owDebug.postMessage('open');
+          } else {
+            showToast('调试入口不可用');
+          }
+        } catch (e) {
+          showToast('调试入口不可用');
+        }
+      }
+
+      document.getElementById('dbgLink').addEventListener('click', openDebug);
+    })();
   </script>
 </body>
 </html>
