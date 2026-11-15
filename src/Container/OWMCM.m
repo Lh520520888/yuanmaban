@@ -31,7 +31,7 @@ typedef void *       (*ow_object_copy_t)(void *obj);
 typedef void         (*ow_object_free_t)(void *obj);
 typedef const char * (*ow_object_get_identifier_t)(void *obj, void **error);
 typedef const char * (*ow_object_get_path_t)(void *obj, void **error);
-typedef bool         (*ow_object_sbx_activate_t)(void *obj);
+typedef bool         (*ow_object_sbx_activate_t)(void *obj, bool flag);
 typedef char *       (*ow_copy_sandbox_token_t)(void *obj);
 typedef const char * (*ow_error_get_message_t)(void *query);
 typedef int          (*ow_error_get_posix_errno_t)(void *query);
@@ -44,6 +44,7 @@ static ow_xpc_string_create_t gXPCString = NULL;
 static ow_xpc_release_t       gXPCRelease = NULL;
 
 static const char * const kOWMCMLibPaths[] = {
+    "/usr/lib/system/libsystem_containermanager.dylib",
     "/usr/lib/system/libsystem_container.dylib",
     "/System/Library/PrivateFrameworks/MobileContainerManager.framework/MobileContainerManager",
     NULL,
@@ -324,6 +325,26 @@ static void OWQueryRelease(void *q) {
         return nil;
     }
 
+    // MHA 路线不做枚举：给了 identifier 就直接定向查询（flags 0x900000000）
+    if (identifiers.count) {
+        NSMutableArray<OWMCMContainer *> *out = [NSMutableArray array];
+        for (NSString *ident in identifiers) {
+            NSError *terr = nil;
+            OWMCMContainer *c = [self _targetedContainerForClass:cls
+                                                      identifier:ident
+                                                           error:&terr];
+            if (c) {
+                [out addObject:c];
+            } else if (terr) {
+                OWLog(@"OWMCM: 定向取容器失败 id=%@: %@", ident, terr.localizedDescription);
+            }
+        }
+        OWLog(@"OWMCM: class=%llu (%@) 定向到 %lu 个",
+              (unsigned long long)cls, [OWMCM classNameFor:cls],
+              (unsigned long)out.count);
+        return out;
+    }
+
     // 身份不符时先记一条身份告警（仍尝试查询：部分版本按 team id / UID 放行）。
     // 真正的拒绝会以 QueryFailed(EPERM) 形式返回。
     if (!_identityOK) {
@@ -464,7 +485,7 @@ static void OWQueryRelease(void *q) {
 
     void *xid = gXPCString ? gXPCString(identifier.UTF8String) : NULL;
 
-    static const uint64_t kFlags[] = {0x100000000ULL, 0x800000000ULL, 0x8000000000ULL};
+    static const uint64_t kFlags[] = {0x900000000ULL, 0x100000000ULL, 0x800000000ULL, 0x8000000000ULL};
     static const uint64_t kParts[] = {0, 1, 2, 3, 4};
     NSUInteger partCount = (cls == OWMCMClassAppGroup) ? 2 : 5; // group 只试 0 / 3
 
@@ -473,7 +494,7 @@ static void OWQueryRelease(void *q) {
     uint64_t hitPart = 0, hitFlags = 0;
     NSString *lastErrorMsg = nil;
 
-    for (NSUInteger fi = 0; fi < 3 && !foundToken; fi++) {
+    for (NSUInteger fi = 0; fi < 4 && !foundToken; fi++) {
         for (NSUInteger pi = 0; pi < partCount && !foundToken; pi++) {
             uint64_t part = (cls == OWMCMClassAppGroup && pi == 1) ? 3 : kParts[pi];
             uint64_t flags = kFlags[fi];
@@ -503,23 +524,28 @@ static void OWQueryRelease(void *q) {
             }
 
             void *oerr = NULL;
+            // result 是借用对象，PoC 要求先 copy 再取 token
+            void *copied = gOWMCMfns.object_copy ? gOWMCMfns.object_copy(obj) : NULL;
+            void *useObj = copied ? copied : obj;
+
             const char *path = gOWMCMfns.object_get_path
-                ? gOWMCMfns.object_get_path(obj, &oerr) : NULL;
+                ? gOWMCMfns.object_get_path(useObj, &oerr) : NULL;
             const char *ident = gOWMCMfns.object_get_identifier
-                ? gOWMCMfns.object_get_identifier(obj, &oerr) : NULL;
+                ? gOWMCMfns.object_get_identifier(useObj, &oerr) : NULL;
 
-            BOOL activated = NO;
-            if (gOWMCMfns.object_sbx_activate) {
-                activated = gOWMCMfns.object_sbx_activate(obj);
-            }
-
+            // 先 copy token 确认非空，再 activate
             NSString *token = nil;
             if (gOWMCMfns.copy_sandbox_token) {
-                char *tok = gOWMCMfns.copy_sandbox_token(obj);
+                char *tok = gOWMCMfns.copy_sandbox_token(useObj);
                 if (tok) {
                     token = [NSString stringWithUTF8String:tok];
                     free(tok);
                 }
+            }
+
+            BOOL activated = NO;
+            if (token.length && gOWMCMfns.object_sbx_activate) {
+                activated = gOWMCMfns.object_sbx_activate(useObj, false);
             }
 
             if (path && path[0] == '/') {
@@ -539,6 +565,7 @@ static void OWQueryRelease(void *q) {
                     bestActivated = activated;
                 }
             }
+            if (copied && gOWMCMfns.object_free) gOWMCMfns.object_free(copied);
             OWQueryRelease(q);
         }
     }
