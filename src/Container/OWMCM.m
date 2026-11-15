@@ -490,8 +490,7 @@ static void OWQueryRelease(void *q) {
     //   0x800000000 = bit35 App Group 访问
     //   0x900000000 = 两者叠加 = 查询 + 签发 extension（MHA 路线正解）
     // 其余两个值是 26.x / 旧版的兜底。
-    static const uint64_t kFlags[] = {0x900000000ULL, 0x100000000ULL,
-                                      0x800000000ULL, 0x8000000000ULL};
+    static const uint64_t kFlags[] = {0x900000000ULL};
     // part 只用 0（整个容器）。PoC / 3105 / 目标包都是 0。
     // part 3 是 Library/Caches，只在 worse_query 的 symlink 劫持里有意义——
     // 拿它当常规路径会得到子目录，后续按相对路径拼文件就全错了。
@@ -506,7 +505,7 @@ static void OWQueryRelease(void *q) {
     // 所以 activate 成功的那一份必须留到读完文件，由 OWMCMContainer.dealloc 释放。
     void *retained = NULL;
 
-    for (NSUInteger fi = 0; fi < 4 && !foundToken; fi++) {
+    for (NSUInteger fi = 0; fi < 1 && !foundToken; fi++) {
         for (NSUInteger pi = 0; pi < partCount && !foundToken; pi++) {
             uint64_t flags = kFlags[fi];
 

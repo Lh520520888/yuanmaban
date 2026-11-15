@@ -31,7 +31,12 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
         if (!_endpoint.length) {
             OWLog(@"上传: 未配置 OWUploadEndpoint（Info.plist 为空且无覆盖）");
         } else {
-            OWLog(@"上传: 端点 = %@", _endpoint);
+            // 端点只在变化时打一次，避免每个 uploader 实例都刷一行
+            static NSString *lastEndpoint = nil;
+            if (![lastEndpoint isEqualToString:_endpoint]) {
+                lastEndpoint = [_endpoint copy];
+                OWLog(@"上传: 端点 = %@", _endpoint);
+            }
         }
         _queue = [self _loadQueue];
     }

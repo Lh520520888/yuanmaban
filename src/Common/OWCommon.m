@@ -30,10 +30,19 @@ static NSString * _Nonnull OWLogDir(void) {
     NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
     va_end(args);
 
-    NSString *line_out = [NSString stringWithFormat:@"[%@] %s:%d %@\n",
-                          [NSISO8601DateFormatter stringFromDate:[NSDate date]
-                                                        timeZone:[NSTimeZone localTimeZone]
-                                                       formatOptions:0],
+    static NSDateFormatter *fmt = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        fmt = [NSDateFormatter new];
+        fmt.dateFormat = @"MM-dd HH:mm:ss.SSS";
+        fmt.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    });
+    NSString *ts;
+    @synchronized (fmt) {
+        ts = [fmt stringFromDate:[NSDate date]];
+    }
+    NSString *line_out = [NSString stringWithFormat:@"%@ %s:%d %@\n",
+                          ts,
                           file ? [[NSString stringWithUTF8String:file] lastPathComponent].UTF8String : "?",
                           line, msg];
 
