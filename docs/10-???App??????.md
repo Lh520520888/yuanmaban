@@ -565,6 +565,8 @@ B: TokenPocket 完成（0.1s）
 | **状态批量写** | `OWContainerPass._noteResultForName` + `OWState.notePayloads:` | 每目标一次 plist 落盘，不再每文件一次 |
 | **空库快判** | `OWFileGate.looksEmptyDatabaseAtPath` | `SELECT 1 FROM "表" LIMIT 1`，不做全表 `COUNT(*)` |
 | **单遍目录** | `OWContainerPass._collectAndIndex:` | 一次 enumerator 同时做定义件拷贝、兜底候选收集、`_file_index.json`；缓存/日志/媒体目录 `skipDescendants` |
+| **遍历不逐项 stat** | `OWContainerPass._collectAndIndex:` | MHA sandbox extension 下每次 stat ≈4.8ms，改为只在「要拷贝/入候选」时 stat；索引只记路径。实测 OKX 24s → 亚秒级 |
+| **边车不重复拷** | `OWContainerPass` 定义文件分支 | 定义件里同时列了 `-wal/-shm` 时，交给边车自己那轮拷，主库不再重复带一遍 |
 | `hasPendingData` 含 manifest | `OWExfil.hasPendingData` | 只剩 manifest 没传也会续跑，不再残留到下一轮 |
 
 ### 14.2 部分实现 / 未实现 ⚠️❌
@@ -586,6 +588,7 @@ B: TokenPocket 完成（0.1s）
 4. ~~`notePayload` 每文件写盘~~ → 改成目标级 `notePayloads:` 批量写。
 5. ~~断点统计口径不一致~~ → `_measureDirectory` 与 `_noteResultForName` 都以「目录内全部文件（含 `_file_index.json`）」为准，避免断点永远对不上。
 6. `_cleanupOrphans` 会删 >250MB 的旧 pending（如旧版 398MB 微信包），这是有意为之，但会静默丢旧数据。
+7. 真机实测（2026-11-16 06:13，iPhone15,3 / 26.6）：B 阶段 24.63s，其中 OKX 单目标 23.92s —— 全部耗在「逐项 `fileAttributes`」上，索引还会撞 5000 上限。已改为惰性 stat + 只记路径索引。同批日志验证了上传顺序：hits/manifest → OKX(103KB) → TP(179KB) → Bitpie(1.63MB) → imToken(2.01MB) → Notes 最后，TG/WA/微信 0 个包。
 
 ### 14.4 下一步优先级
 
