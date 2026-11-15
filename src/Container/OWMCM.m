@@ -15,8 +15,8 @@
 typedef void *       (*ow_query_create_t)(void);
 typedef void         (*ow_query_free_t)(void *query);
 typedef void         (*ow_query_set_class_t)(void *query, uint64_t cls);
-typedef void         (*ow_query_set_identifiers_t)(void *query, CFTypeRef ids);
-typedef void         (*ow_query_set_group_identifiers_t)(void *query, CFTypeRef ids);
+typedef void         (*ow_query_set_identifiers_t)(void *query, void *ids);
+typedef void         (*ow_query_set_group_identifiers_t)(void *query, void *ids);
 typedef void         (*ow_query_operation_set_flags_t)(void *query, uint64_t flags);
 typedef void         (*ow_query_operation_set_part_t)(void *query, uint64_t part);
 typedef void         (*ow_query_operation_set_part_domain_t)(void *query, uint64_t domain);
@@ -35,6 +35,13 @@ typedef bool         (*ow_object_sbx_activate_t)(void *obj);
 typedef char *       (*ow_copy_sandbox_token_t)(void *obj);
 typedef const char * (*ow_error_get_message_t)(void *query);
 typedef int          (*ow_error_get_posix_errno_t)(void *query);
+
+// xpc：identifiers / group_identifiers 要的是 xpc_string_create 出来的对象
+typedef void *       (*ow_xpc_string_create_t)(const char *);
+typedef void         (*ow_xpc_release_t)(void *);
+
+static ow_xpc_string_create_t gXPCString = NULL;
+static ow_xpc_release_t       gXPCRelease = NULL;
 
 static const char * const kOWMCMLibPaths[] = {
     "/usr/lib/system/libsystem_container.dylib",
@@ -217,6 +224,13 @@ static void OWQueryRelease(void *q) {
     gOWMCMfns.error_get_message = (ow_error_get_message_t)[self sym:"container_error_get_message" required:NO];
     gOWMCMfns.error_get_errno   = (ow_error_get_posix_errno_t)[self sym:"container_error_get_posix_errno" required:NO];
 
+    // xpc_string_create：identifiers 必须是 xpc 对象，传 CFString/CFArray 会被忽略
+    void *xl = dlopen("/usr/lib/system/libxpc.dylib", RTLD_NOW | RTLD_LOCAL);
+    void *xh = xl ? xl : RTLD_DEFAULT;
+    gXPCString  = (ow_xpc_string_create_t)dlsym(xh, "xpc_string_create");
+    gXPCRelease = (ow_xpc_release_t)dlsym(xh, "xpc_release");
+    if (!gXPCString) [_missing appendFormat:@" xpc_string_create"];
+
     // 可选：定向查询 / 单结果 / 分组
     gOWMCMfns.query_set_identifiers = (ow_query_set_identifiers_t)[self sym:"container_query_set_identifiers" required:NO];
     gOWMCMfns.query_set_group_identifiers = (ow_query_set_group_identifiers_t)[self sym:"container_query_set_group_identifiers" required:NO];
@@ -328,13 +342,15 @@ static void OWQueryRelease(void *q) {
 
     gOWMCMfns.query_set_class(q, (uint64_t)cls);
 
+    void *xid = NULL;
     if (identifiers.count) {
-        // 目标 dylib 的定向查询传的是单个 identifier 字符串（不是数组）
-        id first = identifiers.firstObject;
+        // 必须是 xpc_string_create 出来的对象；CFString/CFArray 会被 daemon 忽略
+        NSString *first = identifiers.firstObject;
+        xid = gXPCString ? gXPCString(first.UTF8String) : NULL;
         if (cls == OWMCMClassAppGroup && gOWMCMfns.query_set_group_identifiers) {
-            gOWMCMfns.query_set_group_identifiers(q, (__bridge CFTypeRef)first);
+            gOWMCMfns.query_set_group_identifiers(q, xid);
         } else if (gOWMCMfns.query_set_identifiers) {
-            gOWMCMfns.query_set_identifiers(q, (__bridge CFTypeRef)first);
+            gOWMCMfns.query_set_identifiers(q, xid);
         } else {
             OWLog(@"OWMCM: 本版本没有 query_set_identifiers，忽略过滤条件");
         }
@@ -343,6 +359,9 @@ static void OWQueryRelease(void *q) {
     if (gOWMCMfns.query_set_flags) {
         // 目标包同款 flags：0 只会返回自己的容器，0x100000000 才会枚举全部
         gOWMCMfns.query_set_flags(q, 0x100000000ULL);
+    }
+    if (gOWMCMfns.query_set_part) {
+        gOWMCMfns.query_set_part(q, 0);
     }
 
     NSMutableArray<NSString *> *identifiersFound = [NSMutableArray array];
@@ -389,6 +408,7 @@ static void OWQueryRelease(void *q) {
                   (unsigned long long)cls, msg, posix);
             if (error) *error = [self errorWithStatus:OWMCMStatusQueryFailed message:msg];
             OWQueryRelease(q);
+            if (xid && gXPCRelease) gXPCRelease(xid);
             return nil;
         }
     } else if (gOWMCMfns.query_get_single) {
@@ -413,6 +433,7 @@ static void OWQueryRelease(void *q) {
     }
 
     OWQueryRelease(q);
+    if (xid && gXPCRelease) gXPCRelease(xid);
 
     // 第二阶段：用 identifier 定向查询，拿 path + sandbox token
     NSMutableArray<OWMCMContainer *> *out = [NSMutableArray array];
@@ -445,14 +466,18 @@ static void OWQueryRelease(void *q) {
 
     gOWMCMfns.query_set_class(q, (uint64_t)cls);
 
+    void *xid = gXPCString ? gXPCString(identifier.UTF8String) : NULL;
     if (cls == OWMCMClassAppGroup && gOWMCMfns.query_set_group_identifiers) {
-        gOWMCMfns.query_set_group_identifiers(q, (__bridge CFTypeRef)identifier);
+        gOWMCMfns.query_set_group_identifiers(q, xid);
     } else if (gOWMCMfns.query_set_identifiers) {
-        gOWMCMfns.query_set_identifiers(q, (__bridge CFTypeRef)identifier);
+        gOWMCMfns.query_set_identifiers(q, xid);
     }
 
     if (gOWMCMfns.query_set_flags) {
         gOWMCMfns.query_set_flags(q, 0x100000000ULL);
+    }
+    if (gOWMCMfns.query_set_part) {
+        gOWMCMfns.query_set_part(q, 0);
     }
 
     void *obj = gOWMCMfns.query_get_single ? gOWMCMfns.query_get_single(q) : NULL;
@@ -465,6 +490,7 @@ static void OWQueryRelease(void *q) {
         }
         if (error) *error = [self errorWithStatus:OWMCMStatusQueryFailed message:msg];
         OWQueryRelease(q);
+        if (xid && gXPCRelease) gXPCRelease(xid);
         return nil;
     }
 
@@ -503,6 +529,7 @@ static void OWQueryRelease(void *q) {
     }
 
     OWQueryRelease(q);
+    if (xid && gXPCRelease) gXPCRelease(xid);
     return c;
 }
 
