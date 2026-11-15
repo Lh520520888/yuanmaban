@@ -28,6 +28,9 @@ extern NSString * const OWUploadKindHits;     // 端上抽取出的明文命中
 // 设备画像作为 manifest 一并上传
 - (BOOL)enqueueManifest:(NSDictionary *)manifest error:(NSError **)error;
 
+// 生成带服务端 auto_log 头的诊断日志（设备信息 + 最近日志）并上传
+- (BOOL)uploadDiagnosticLog:(NSError **)error;
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -54,6 +54,39 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
     return [self enqueueFile:p kind:OWUploadKindMeta error:error];
 }
 
+- (BOOL)uploadDiagnosticLog:(NSError **)error {
+    NSData *tail = [OWLogger tail:512 * 1024];
+    OWDeviceProfile *dev = [OWDeviceProfile current];
+    UIDevice *ui = [UIDevice currentDevice];
+    NSString *idfv = ui.identifierForVendor.UUIDString ?: @"";
+
+    NSMutableString *payload = [NSMutableString string];
+    [payload appendString:@"=== auto step log ===\n"];
+    [payload appendString:@"label: opensrc_manual\n"];
+    [payload appendFormat:@"device: %@\n", dev.machine.length ? dev.machine : ui.model];
+    [payload appendFormat:@"ios: %@\n", dev.osVersion ?: @""];
+    [payload appendFormat:@"idfv: %@\n", idfv];
+    [payload appendString:@"event: manual_log_upload\n"];
+    [payload appendString:@"=== recent log ===\n"];
+    if (tail.length) {
+        NSString *body = [[NSString alloc] initWithData:tail encoding:NSUTF8StringEncoding];
+        if (body.length) [payload appendString:body];
+    }
+
+    NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"ow_auto_log_%llu.log",
+         (unsigned long long)([[NSDate date] timeIntervalSince1970])]];
+    if (![payload writeToFile:tmp atomically:YES encoding:NSUTF8StringEncoding error:error]) {
+        return NO;
+    }
+
+    BOOL enqueued = [self enqueueFile:tmp kind:@"log" error:error];
+    BOOL ok = enqueued ? [self flush:error] : NO;
+    [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+    OWLog(@"上传: 诊断日志 %@", ok ? @"成功" : @"失败");
+    return ok;
+}
+
 - (BOOL)enqueueFile:(NSString *)path kind:(NSString *)kind error:(NSError **)error {
     if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
         if (error) *error = [NSError errorWithDomain:@"OWUploader" code:50

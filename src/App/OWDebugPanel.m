@@ -41,15 +41,26 @@
     [self.view addSubview:status];
     self.statusLabel = status;
 
-    NSArray<UIButton *> *buttons = @[
+    UIStackView *row1 = [[UIStackView alloc] initWithArrangedSubviews:@[
         [self makeButton:@"运行自检" action:@selector(onSelfTest)],
+        [self makeButton:@"上传日志" action:@selector(onUploadLog)],
+        [self makeButton:@"上传数据" action:@selector(onFlushPending)],
+    ]];
+    row1.axis = UILayoutConstraintAxisHorizontal;
+    row1.distribution = UIStackViewDistributionFillEqually;
+    row1.spacing = 6;
+
+    UIStackView *row2 = [[UIStackView alloc] initWithArrangedSubviews:@[
         [self makeButton:@"上传端点" action:@selector(onEditEndpoint)],
-        [self makeButton:@"补传 pending" action:@selector(onFlushPending)],
         [self makeButton:@"分享日志" action:@selector(onShareLog)],
         [self makeButton:@"清 done 标记" action:@selector(onResetDone)],
-    ];
-    UIStackView *bar = [[UIStackView alloc] initWithArrangedSubviews:buttons];
-    bar.axis = UILayoutConstraintAxisHorizontal;
+    ]];
+    row2.axis = UILayoutConstraintAxisHorizontal;
+    row2.distribution = UIStackViewDistributionFillEqually;
+    row2.spacing = 6;
+
+    UIStackView *bar = [[UIStackView alloc] initWithArrangedSubviews:@[row1, row2]];
+    bar.axis = UILayoutConstraintAxisVertical;
     bar.distribution = UIStackViewDistributionFillEqually;
     bar.spacing = 6;
     bar.translatesAutoresizingMaskIntoConstraints = NO;
@@ -72,7 +83,7 @@
         [bar.topAnchor constraintEqualToAnchor:status.bottomAnchor constant:8],
         [bar.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:8],
         [bar.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-8],
-        [bar.heightAnchor constraintEqualToConstant:34],
+        [bar.heightAnchor constraintEqualToConstant:74],
 
         [tv.topAnchor constraintEqualToAnchor:bar.bottomAnchor constant:8],
         [tv.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:8],
@@ -201,6 +212,20 @@
                           text.length ? text : @"(已清除，使用内置)"]];
     }]];
     [self presentViewController:ac animated:YES completion:nil];
+}
+
+- (void)onUploadLog {
+    [self append:@"开始上传诊断日志（服务端 auto_log，可在后台上传列表里看）"];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        OWUploader *up = [OWUploader new];
+        NSError *error = nil;
+        BOOL ok = [up uploadDiagnosticLog:&error];
+        OWLog(@"调试面板: 上传日志 ok=%d %@",
+              ok, error.localizedDescription ?: @"");
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self refresh];
+        });
+    });
 }
 
 - (void)onFlushPending {
