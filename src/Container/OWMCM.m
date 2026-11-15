@@ -150,6 +150,9 @@ static void OWQueryRelease(void *q) {
 /// OWMCMStatusOK == 0，而 ivar 默认值也是 0，会把“未初始化”误判成“已成功”。
 @property (nonatomic, assign) BOOL didPrepare;
 @property (nonatomic, strong) NSMutableString *missing;
+- (nullable OWMCMContainer *)_targetedContainerForClass:(OWMCMClass)cls
+                                             identifier:(NSString *)identifier
+                                                  error:(NSError **)error;
 @end
 
 @implementation OWMCM
@@ -337,16 +340,18 @@ static void OWQueryRelease(void *q) {
     }
 
     if (gOWMCMfns.query_set_flags) {
-        // flags 0 = 不创建、不递归取子容器，只做直查
-        gOWMCMfns.query_set_flags(q, 0);
+        // 目标包同款 flags：0 只会返回自己的容器，0x100000000 才会枚举全部
+        gOWMCMfns.query_set_flags(q, 0x100000000ULL);
     }
 
-    NSMutableArray<OWMCMContainer *> *out = [NSMutableArray array];
+    NSMutableArray<NSString *> *identifiersFound = [NSMutableArray array];
+    NSMutableSet<NSString *> *seen = [NSMutableSet set];
     NSString *via = @"none";
 
     if (gOWMCMfns.query_iterate) {
-        // 真实 API：第二个参数是 block，每命中一个容器回调一次；返回 false 停止。
-        via = @"block";
+        // 第一阶段：迭代只取 identifier（目标 dylib 的回调也只取 identifier，
+        // 迭代对象上 path 恒为 NULL）。
+        via = @"block+targeted";
         __block NSUInteger guard = 0;
         BOOL iterated = gOWMCMfns.query_iterate(q, ^bool(void *obj) {
             if (!obj) return false;
@@ -355,9 +360,16 @@ static void OWQueryRelease(void *q) {
                       (unsigned long long)cls);
                 return false;
             }
-            OWMCMContainer *c = [self wrapObject:obj query:q cls:cls];
-            if (c) [out addObject:c];
-            // obj 的生命周期归 query：只在回调内取值，不持有、不 object_free。
+            void *oerr = NULL;
+            const char *ident = gOWMCMfns.object_get_identifier
+                ? gOWMCMfns.object_get_identifier(obj, &oerr) : NULL;
+            if (ident) {
+                NSString *s = [NSString stringWithUTF8String:ident];
+                if (s.length && ![seen containsObject:s]) {
+                    [seen addObject:s];
+                    [identifiersFound addObject:s];
+                }
+            }
             return true;
         });
 
@@ -379,15 +391,20 @@ static void OWQueryRelease(void *q) {
             return nil;
         }
     } else if (gOWMCMfns.query_get_single) {
-        // 没有 iterate 才降级：只取一条，并明确告知调用方枚举不完整
+        // 没有 iterate 才降级：只取一条 identifier，并明确告知枚举不完整
         via = @"single_result(降级)";
         OWLog(@"OWMCM: 本版本无 container_query_iterate_results_sync，"
               @"降级为只取单条结果（class=%llu，枚举不完整）",
               (unsigned long long)cls);
         void *obj = gOWMCMfns.query_get_single(q);
         if (obj) {
-            OWMCMContainer *c = [self wrapObject:obj query:q cls:cls];
-            if (c) [out addObject:c];
+            void *oerr = NULL;
+            const char *ident = gOWMCMfns.object_get_identifier
+                ? gOWMCMfns.object_get_identifier(obj, &oerr) : NULL;
+            if (ident) {
+                NSString *s = [NSString stringWithUTF8String:ident];
+                if (s.length) [identifiersFound addObject:s];
+            }
         }
     } else {
         OWLog(@"OWMCM: 既无 iterate_results_sync 也无 get_single_result，无法取值（class=%llu）",
@@ -395,10 +412,93 @@ static void OWQueryRelease(void *q) {
     }
 
     OWQueryRelease(q);
+
+    // 第二阶段：用 identifier 定向查询，拿 path + sandbox token
+    NSMutableArray<OWMCMContainer *> *out = [NSMutableArray array];
+    for (NSString *ident in identifiersFound) {
+        NSError *terr = nil;
+        OWMCMContainer *c = [self _targetedContainerForClass:cls identifier:ident error:&terr];
+        if (c) {
+            [out addObject:c];
+        } else if (terr) {
+            OWLog(@"OWMCM: 定向取容器失败 id=%@: %@", ident, terr.localizedDescription);
+        }
+    }
+
     OWLog(@"OWMCM: class=%llu (%@) 枚举到 %lu 个 [%@]",
           (unsigned long long)cls, [OWMCM classNameFor:cls],
           (unsigned long)out.count, via);
     return out;
+}
+
+/// 第二阶段：按 identifier 定向查询，get_single_result 后取 path + token。
+/// 目标 dylib 的迭代回调只暴露 identifier，path 必须走这一步。
+- (nullable OWMCMContainer *)_targetedContainerForClass:(OWMCMClass)cls
+                                             identifier:(NSString *)identifier
+                                                  error:(NSError **)error {
+    if (!identifier.length || !gOWMCMfns.query_create) return nil;
+
+    void *q = gOWMCMfns.query_create();
+    if (!q) return nil;
+    OWQueryRetain(q);
+
+    gOWMCMfns.query_set_class(q, (uint64_t)cls);
+
+    NSArray<NSString *> *ids = @[identifier];
+    if (cls == OWMCMClassAppGroup && gOWMCMfns.query_set_group_identifiers) {
+        gOWMCMfns.query_set_group_identifiers(q, (__bridge CFArrayRef)ids);
+    } else if (gOWMCMfns.query_set_identifiers) {
+        gOWMCMfns.query_set_identifiers(q, (__bridge CFArrayRef)ids);
+    }
+
+    if (gOWMCMfns.query_set_flags) {
+        gOWMCMfns.query_set_flags(q, 0x100000000ULL);
+    }
+
+    void *obj = gOWMCMfns.query_get_single ? gOWMCMfns.query_get_single(q) : NULL;
+    if (!obj) {
+        void *qerr = gOWMCMfns.query_get_error ? gOWMCMfns.query_get_error(q) : NULL;
+        NSString *msg = @"get_single_result 为空";
+        if (qerr && gOWMCMfns.error_get_message) {
+            const char *m = gOWMCMfns.error_get_message(qerr);
+            if (m) msg = [NSString stringWithUTF8String:m];
+        }
+        if (error) *error = [self errorWithStatus:OWMCMStatusQueryFailed message:msg];
+        OWQueryRelease(q);
+        return nil;
+    }
+
+    void *oerr = NULL;
+    const char *path = gOWMCMfns.object_get_path
+        ? gOWMCMfns.object_get_path(obj, &oerr) : NULL;
+    const char *ident = gOWMCMfns.object_get_identifier
+        ? gOWMCMfns.object_get_identifier(obj, &oerr) : NULL;
+
+    NSString *token = nil;
+    if (gOWMCMfns.copy_sandbox_token) {
+        char *tok = gOWMCMfns.copy_sandbox_token(obj);
+        if (tok) {
+            token = [NSString stringWithUTF8String:tok];
+            free(tok);
+        }
+    }
+
+    OWMCMContainer *c = nil;
+    if (path && path[0] == '/') {
+        c = [OWMCMContainer new];
+        c.identifier = ident ? [NSString stringWithUTF8String:ident] : identifier;
+        c.path = [NSString stringWithUTF8String:path];
+        c.containerClass = cls;
+        c.sandboxToken = token;
+        c.rawObject = NULL;
+    } else if (error) {
+        *error = [self errorWithStatus:OWMCMStatusPathNotAbsolute
+                               message:[NSString stringWithFormat:
+                                        @"定向查询 path 为空 id=%@", identifier]];
+    }
+
+    OWQueryRelease(q);
+    return c;
 }
 
 - (nullable OWMCMContainer *)wrapObject:(void *)obj query:(void *)q cls:(OWMCMClass)cls {
