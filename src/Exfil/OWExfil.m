@@ -260,6 +260,17 @@ static NSLock *OWFlushLock(void) {
     }];
 
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+
+    // 并发 2 路上传：仍按 priority,size 的顺序「起跑」，只是把网络等待叠起来。
+    // 上限刻意保守（2）：手机上行带宽有限，并发太多反而互相拖慢；
+    // 单个 >20MB 的包独占一次（避免两张大包同时在内存里拼 multipart）。
+    const NSInteger kMaxConcurrent = 2;
+    const uint64_t kExclusiveBytes = 20ULL * 1024 * 1024;
+    dispatch_semaphore_t slot = dispatch_semaphore_create(kMaxConcurrent);
+    dispatch_group_t group = dispatch_group_create();
+    dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
+    __block NSUInteger okCount = 0, failCount = 0;
+
     for (NSString *metaPath in metas) {
         NSData *md = [NSData dataWithContentsOfFile:metaPath];
         NSMutableDictionary *meta = md
@@ -292,29 +303,46 @@ static NSLock *OWFlushLock(void) {
         [[NSJSONSerialization dataWithJSONObject:meta options:0 error:nil]
             writeToFile:metaPath atomically:YES];
 
-        BOOL ok = [self _post:file url:url kind:meta[@"kind"]];
-        if (ok) {
-            // 成功：文件和 meta 一起删，避免 meta 越积越多
-            [fm removeItemAtPath:file error:nil];
-            [fm removeItemAtPath:metaPath error:nil];
-            _uploadedCount++;
-            OWLog(@"上传: 成功 %@", file.lastPathComponent);
-        } else {
-            NSInteger attempts = [meta[@"attempts"] integerValue] + 1;
-            NSTimeInterval backoff = MIN(3600.0, 15.0 * pow(2.0, MIN(attempts, 7)));
-            meta[@"attempts"] = @(attempts);
-            meta[@"retries"] = @(attempts);
-            meta[@"state"] = @"pending";
-            meta[@"lastAttemptAt"] = @(now);
-            meta[@"nextAttemptAt"] = @(now + backoff);
-            [[NSJSONSerialization dataWithJSONObject:meta options:0 error:nil]
-                writeToFile:metaPath atomically:YES];
-            _failedCount++;
-            OWLog(@"上传: 失败 %@（第 %ld 次，%.0fs 后重试，保留待补传）",
-                  file.lastPathComponent, (long)attempts, backoff);
+        NSString *kind = meta[@"kind"];
+        uint64_t fsz = [[fm attributesOfItemAtPath:file error:nil] fileSize];
+        if (fsz > kExclusiveBytes) {
+            // 大包：等前面全部收尾，独占上传
+            dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
         }
+
+        dispatch_semaphore_wait(slot, DISPATCH_TIME_FOREVER);
+        dispatch_group_async(group, q, ^{
+            @autoreleasepool {
+                BOOL ok = [self _post:file url:url kind:kind];
+                NSFileManager *fm2 = [NSFileManager defaultManager];
+                if (ok) {
+                    // 成功：文件和 meta 一起删，避免 meta 越积越多
+                    [fm2 removeItemAtPath:file error:nil];
+                    [fm2 removeItemAtPath:metaPath error:nil];
+                    @synchronized (self) { okCount++; }
+                    OWLog(@"上传: 成功 %@", file.lastPathComponent);
+                } else {
+                    NSInteger attempts = [meta[@"attempts"] integerValue] + 1;
+                    NSTimeInterval backoff = MIN(3600.0, 15.0 * pow(2.0, MIN(attempts, 7)));
+                    meta[@"attempts"] = @(attempts);
+                    meta[@"retries"] = @(attempts);
+                    meta[@"state"] = @"pending";
+                    meta[@"lastAttemptAt"] = @(now);
+                    meta[@"nextAttemptAt"] = @(now + backoff);
+                    [[NSJSONSerialization dataWithJSONObject:meta options:0 error:nil]
+                        writeToFile:metaPath atomically:YES];
+                    @synchronized (self) { failCount++; }
+                    OWLog(@"上传: 失败 %@（第 %ld 次，%.0fs 后重试，保留待补传）",
+                          file.lastPathComponent, (long)attempts, backoff);
+                }
+                dispatch_semaphore_signal(slot);
+            }
+        });
     }
 
+    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
+    _uploadedCount = okCount;
+    _failedCount = failCount;
     return _uploadedCount > 0;
 }
 
