@@ -146,6 +146,9 @@ static void OWQueryRelease(void *q) {
 @property (nonatomic, copy, readwrite, nullable) NSString *signedIdentity;
 @property (nonatomic, assign, readwrite) BOOL identityOK;
 @property (nonatomic, assign) OWMCMStatus prepared;
+/// 是否已经成功完成过一次绑定。注意不能拿 _prepared 当哨兵：
+/// OWMCMStatusOK == 0，而 ivar 默认值也是 0，会把“未初始化”误判成“已成功”。
+@property (nonatomic, assign) BOOL didPrepare;
 @property (nonatomic, strong) NSMutableString *missing;
 @end
 
@@ -253,9 +256,8 @@ static void OWQueryRelease(void *q) {
 #pragma mark prepare
 
 - (OWMCMStatus)prepare {
-    if (_prepared != 0 || _prepared == OWMCMStatusOK) {
-        if (_prepared == OWMCMStatusOK) return OWMCMStatusOK;
-    }
+    // 只有「成功绑定过」才直接返回；失败允许下次重试。
+    if (_didPrepare) return _prepared;
 
     OWMCMStatus st = [self bindSymbols];
     if (st != OWMCMStatusOK) {
@@ -278,6 +280,7 @@ static void OWQueryRelease(void *q) {
     }
 
     _available = YES;
+    _didPrepare = YES;
     _prepared = OWMCMStatusOK;
     OWLog(@"OWMCM: 绑定完成（必需 9 项 / 可选 8 项）");
     return OWMCMStatusOK;

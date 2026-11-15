@@ -137,7 +137,10 @@
 }
 
 - (NSUInteger)pendingCount {
-    NSString *dir = [OWUploader new].pendingDir;
+    // 不要在这里 new OWUploader：它的 init 会打日志，2 秒刷新一次会把日志刷爆。
+    NSArray *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    NSString *dir = [(docs.firstObject ?: NSTemporaryDirectory())
+                     stringByAppendingPathComponent:@"pending"];
     NSArray *items = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil];
     NSUInteger n = 0;
     for (NSString *f in items) {
