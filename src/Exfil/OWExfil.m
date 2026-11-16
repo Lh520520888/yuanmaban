@@ -280,6 +280,16 @@ static BOOL OWRetryScheduled = NO;
     return NO;
 }
 
+- (BOOL)hasPendingItemWithSuffix:(NSString *)suffix {
+    if (!suffix.length) return NO;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *n in [fm contentsOfDirectoryAtPath:_pendingDir error:nil]) {
+        if ([n hasSuffix:@".meta"]) continue;
+        if ([n hasSuffix:suffix]) return YES;
+    }
+    return NO;
+}
+
 - (BOOL)_flushLocked:(NSError **)error {
     if (!_endpoint.length) {
         if (error) *error = [NSError errorWithDomain:@"OWUploader" code:51

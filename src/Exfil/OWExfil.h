@@ -45,6 +45,9 @@ extern NSString * const OWUploaderDidDrainNotification;
 // 逐个上传 pending 中未成功的条目；失败保留在队列，下次启动继续
 - (BOOL)flush:(NSError **)error;
 
+/// pending 里是否已有以 suffix 结尾的待传文件（用于避免同一目标重复入队）
+- (BOOL)hasPendingItemWithSuffix:(NSString *)suffix;
+
 /// 是否还有未上传成功的关键数据（container/keys/system/hits），用于完成判定
 - (BOOL)hasPendingData;
 

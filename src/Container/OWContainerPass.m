@@ -318,8 +318,13 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             // 否则 _hasValidPayload 判定为无数据，本轮永远不会写 done。
             [self _restorePayloadsFromDir:priorDir];
             // 这个目标本轮已经上传成功过：不要再打包上传一份（服务端会出现重复设备数据）
+            // 注意 OWRoute 打包时会把 AppleNotes 改名成 Notes，键名要一致
+            NSString *upName = [name isEqualToString:@"AppleNotes"] ? @"Notes" : name;
             BOOL uploaded = [[OWState shared] objectForKey:
-                             [@"up_" stringByAppendingString:name]] != nil;
+                             [@"up_" stringByAppendingString:upName]] != nil;
+            if (!uploaded && [(t[@"mode"] ?: @"") isEqualToString:@"whole_container"]) {
+                uploaded = [[OWState shared] objectForKey:@"up_container"] != nil;
+            }
             if (uploaded) {
                 OWLog(@"B: %@ 已上传过，续跑不再重复打包", name);
             } else {
@@ -513,8 +518,12 @@ static NSArray<NSDictionary *> *OWTargets(void) {
     NSString *name = target[@"name"] ?: target[@"bundleId"];
     NSString *mode = target[@"mode"] ?: @"files";
     NSString *outDir = [self.workDir stringByAppendingPathComponent:name];
-    [[NSFileManager defaultManager] createDirectoryAtPath:outDir
-                              withIntermediateDirectories:YES attributes:nil error:nil];
+    NSFileManager *fm0 = [NSFileManager defaultManager];
+    // 采集阶段要么整目标完成、要么整目标重来：
+    // 先清空目标目录，避免上次被杀留下的半成品/旧文件（含 .part）混进这一轮的包。
+    [fm0 removeItemAtPath:outDir error:nil];
+    [fm0 createDirectoryAtPath:outDir
+   withIntermediateDirectories:YES attributes:nil error:nil];
     OWLog(@"B: 采集 %@ (%@) mode=%@%@", name, target[@"bundleId"], mode,
           includeMedia ? @" +media" : @"");
 
