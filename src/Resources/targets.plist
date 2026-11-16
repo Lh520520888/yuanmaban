@@ -131,6 +131,7 @@
 			<key>mode</key><string>files</string>
 			<key>uploadLast</key><true/>
 			<key>includeMedia</key><true/>
+			<key>maxBytes</key><integer>314572800</integer>
 			<key>paths</key>
 			<array>
 				<string>NoteStore.sqlite</string>

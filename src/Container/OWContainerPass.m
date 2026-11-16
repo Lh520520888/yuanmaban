@@ -527,8 +527,17 @@ static NSArray<NSDictionary *> *OWTargets(void) {
     OWLog(@"B: 采集 %@ (%@) mode=%@%@", name, target[@"bundleId"], mode,
           includeMedia ? @" +media" : @"");
 
+    // 单目标体积上限可按目标覆盖（备忘录要从 150MB 提到 300MB 装图片）
+    uint64_t savedCap = self.maxContainerBytes;
+    NSNumber *capNum = target[@"maxBytes"];
+    if ([capNum isKindOfClass:[NSNumber class]] && capNum.unsignedLongLongValue > 0) {
+        self.maxContainerBytes = capNum.unsignedLongLongValue;
+        OWLog(@"B: %@ 单目标上限 = %llu B", name, self.maxContainerBytes);
+    }
+
     if ([mode isEqualToString:@"whole_container"]) {
         [self _zipContainer:containerPath to:[outDir stringByAppendingPathComponent:@"container.zip"] name:name];
+        self.maxContainerBytes = savedCap;
         return;
     }
 
@@ -536,7 +545,9 @@ static NSArray<NSDictionary *> *OWTargets(void) {
     [self _collectAndIndex:target containerPath:containerPath outDir:outDir
                       name:name includeMedia:includeMedia];
 
+    // 记账要用「本目标生效的上限」，所以恢复默认值放到记账之后
     [self _noteResultForName:name bundleId:target[@"bundleId"] dir:outDir containerPath:containerPath];
+    self.maxContainerBytes = savedCap;
 }
 
 /// 采集分三段，按代价从低到高：
@@ -851,6 +862,7 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         @"path": outDir,
         @"fileCount": @(files.count),
         @"bytes": @(total),
+        @"maxBytes": @(self.maxContainerBytes),
         @"emptyDatabase": @(files.count == 0 || total == 0),
         @"isDir": @(YES),
     }];

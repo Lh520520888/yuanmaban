@@ -11,6 +11,9 @@ NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明�
 NSString * const OWUploaderDidUploadFileNotification = @"OWUploaderDidUploadFile";
 NSString * const OWUploaderDidDrainNotification = @"OWUploaderDidDrain";
 
+// 比任何目标的采集上限（含备忘录 300MB）都大；只有明显的历史脏数据才会被清掉
+const unsigned long long OWMaxPendingItemBytes = 500ULL * 1024 * 1024;
+
 static NSLock *OWFlushLock(void) {
     static NSLock *l;
     static dispatch_once_t once;
@@ -448,7 +451,6 @@ static BOOL OWRetryScheduled = NO;
                 [fm removeItemAtPath:p error:nil];
                 continue;
             }
-            // 清理历史遗留的超大 pending（如旧版 398MB 微信包），避免永久阻塞完成判定
             NSData *md = [NSData dataWithContentsOfFile:p];
             NSDictionary *m = md ? [NSJSONSerialization JSONObjectWithData:md options:0 error:nil] : nil;
             unsigned long long sz = [m[@"size"] unsignedLongLongValue];
@@ -456,7 +458,9 @@ static BOOL OWRetryScheduled = NO;
                 NSDictionary *fa = [fm attributesOfItemAtPath:f error:nil];
                 sz = [fa fileSize];
             }
-            if (sz > 250ULL * 1024 * 1024) {
+            // 清理历史遗留的超大 pending（如旧版 398MB 微信包）。
+            // 阈值跟采集上限解耦会静默丢数据，所以统一用 OWMaxPendingItemBytes。
+            if (sz > OWMaxPendingItemBytes) {
                 OWLog(@"上传: 清理超大 pending %@ (%llu B)", f.lastPathComponent, sz);
                 [fm removeItemAtPath:f error:nil];
                 [fm removeItemAtPath:p error:nil];

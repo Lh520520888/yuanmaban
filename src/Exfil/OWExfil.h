@@ -23,6 +23,9 @@ extern NSString * const OWUploaderDidUploadFileNotification;
 /// 队列清空（本轮有成功、无失败、无 pending）—— 用来补一次完成判定
 extern NSString * const OWUploaderDidDrainNotification;
 
+/// pending 单条上限：超过视为历史遗留脏数据（必须大于任一目标的 maxBytes）
+extern const unsigned long long OWMaxPendingItemBytes;
+
 @interface OWUploader : NSObject
 
 /// 当前生效端点：UserDefaults 的 OWUploadEndpointOverride 优先，其次 Info.plist 的 OWUploadEndpoint。

