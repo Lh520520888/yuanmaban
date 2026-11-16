@@ -93,6 +93,12 @@
 			</array>
 			<key>keywords</key><array><string>persistStore</string><string>Keyring</string><string>Accounts</string></array>
 			<key>exts</key><array><string>json</string><string>sqlite</string></array>
+			<key>excludes</key>
+			<array>
+				<string>storageService-SnapController-npm-</string>
+				<string>persist-SnapRegistryController</string>
+				<string>persist-RemoteFeatureFlagController</string>
+			</array>
 		</dict>
 		<dict>
 			<key>name</key><string>OKX</string>
@@ -124,14 +130,16 @@
 			<key>bundleId</key><string>group.com.apple.notes</string>
 			<key>mode</key><string>files</string>
 			<key>uploadLast</key><true/>
+			<key>includeMedia</key><true/>
 			<key>paths</key>
 			<array>
 				<string>NoteStore.sqlite</string>
 				<string>NoteStore.sqlite-wal</string>
 				<string>NoteStore.sqlite-shm</string>
+				<string>Media</string>
 			</array>
 			<key>keywords</key><array><string>NoteStore</string><string>Accounts</string><string>Media</string></array>
-			<key>exts</key><array><string>sqlite</string></array>
+			<key>exts</key><array><string>sqlite</string><string>jpg</string><string>jpeg</string><string>png</string><string>heic</string><string>heif</string><string>mp4</string><string>mov</string><string>gif</string><string>webp</string></array>
 		</dict>
 	</array>
 </dict>

