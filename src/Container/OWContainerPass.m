@@ -132,6 +132,9 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 - (uint64_t)_sizeOf:(NSString *)path;
 - (nullable NSString *)_fuzzyBundleIdForName:(NSString *)name
                                    installed:(NSDictionary<NSString *, NSString *> *)installed;
+- (void)_copyMediaUnder:(NSString *)root
+                   name:(NSString *)name
+                 outDir:(NSString *)outDir;
 @end
 
 @implementation OWContainerPass {
@@ -622,6 +625,11 @@ static NSArray<NSDictionary *> *OWTargets(void) {
                            indexPath:indexPaths includeMedia:includeMedia];
     }
 
+    // ---- C2) 备忘录：按扩展名兜底收图片/视频（Media 目录名在版本间会变）----
+    if (includeMedia) {
+        [self _copyMediaUnder:containerPath name:name outDir:outDir];
+    }
+
     // ---- D) 文件索引：没走兜底时只记定义路径，不为索引白扫容器 ----
     NSMutableArray *indexItems = [NSMutableArray arrayWithCapacity:indexPaths.count];
     for (NSString *rel in indexPaths) [indexItems addObject:@{@"p": rel}];
@@ -637,6 +645,50 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             atomically:YES];
     }
     OWLog(@"B: 索引 %@ %lu 条", name, (unsigned long)indexPaths.count);
+}
+
+/// 备忘录图文附件兜底：不依赖固定目录名（Media / FallbackImages / Previews 都可能），
+/// 直接在容器里按扩展名收图片/视频，保留相对路径；同时打印各附件目录的存在性便于校准。
+- (void)_copyMediaUnder:(NSString *)root
+                   name:(NSString *)name
+                 outDir:(NSString *)outDir {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *d in @[@"Media", @"FallbackImages", @"Previews", @"Accounts"]) {
+        BOOL isDir = NO;
+        NSString *p = [root stringByAppendingPathComponent:d];
+        BOOL exist = [fm fileExistsAtPath:p isDirectory:&isDir];
+        NSUInteger cnt = 0;
+        if (exist && isDir) {
+            for (NSString *f in [fm enumeratorAtPath:p]) {
+                if (++cnt > 9999) break;
+            }
+        }
+        OWLog(@"B: %@ 附件目录 %@ 存在=%@ 条目=%lu", name, d,
+              exist ? @"是" : @"否", (unsigned long)cnt);
+    }
+
+    NSSet *mediaExts = [NSSet setWithArray:@[@"jpg", @"jpeg", @"png", @"gif", @"heic",
+                                             @"heif", @"webp", @"bmp", @"tiff",
+                                             @"mp4", @"mov", @"m4v"]];
+    NSUInteger copied = 0, scanned = 0;
+    uint64_t bytes = 0;
+    NSDirectoryEnumerator *en = [fm enumeratorAtPath:root];
+    for (NSString *rel in en) {
+        if (++scanned > 50000) break;
+        if (copied >= 2000 || bytes >= 100ULL * 1024 * 1024) break;
+        if (_collectedBytes >= self.maxContainerBytes) break;
+        NSString *lower = rel.lowercaseString;
+        // includeMedia=YES：不跳过 Media，但仍跳过 Caches/tmp/日志
+        if (OWIsHeavyRel(lower, YES)) { [en skipDescendants]; continue; }
+        if (![mediaExts containsObject:lower.pathExtension]) continue;
+        if ([fm fileExistsAtPath:[outDir stringByAppendingPathComponent:rel]]) continue;  // 已拷过
+        if ([self _copyItem:[root stringByAppendingPathComponent:rel] toDir:outDir name:rel]) {
+            copied++;
+            bytes += [self _sizeOf:[root stringByAppendingPathComponent:rel]];
+        }
+    }
+    OWLog(@"B: %@ 图片/视频兜底 命中 %lu 个 / %llu B", name,
+          (unsigned long)copied, bytes);
 }
 
 /// 定义目录的单遍处理：命中扩展名/关键词的按相对路径命名；

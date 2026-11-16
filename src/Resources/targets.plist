@@ -14,6 +14,12 @@
 				<string>io.tronlink.wallet</string>
 				<string>com.tronlink.wallet</string>
 				<string>org.tronlink.wallet</string>
+				<string>com.tronlink.pro</string>
+				<string>com.tronlink.ios</string>
+				<string>com.tronlink.wallet.pro</string>
+				<string>com.tronlink.walletpro</string>
+				<string>com.tronlink.tronlinkpro</string>
+				<string>com.tronlink.app</string>
 			</array>
 			<key>mode</key><string>files</string>
 			<key>paths</key>
