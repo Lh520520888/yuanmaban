@@ -18,6 +18,11 @@ typedef NS_ENUM(NSInteger, OWUploadPriority) {
     OWUploadPriorityNotes     = 90,  // 备忘录：永远最后
 };
 
+/// 单个文件上传成功，userInfo[@"name"] = 文件名
+extern NSString * const OWUploaderDidUploadFileNotification;
+/// 队列清空（本轮有成功、无失败、无 pending）—— 用来补一次完成判定
+extern NSString * const OWUploaderDidDrainNotification;
+
 @interface OWUploader : NSObject
 
 /// 当前生效端点：UserDefaults 的 OWUploadEndpointOverride 优先，其次 Info.plist 的 OWUploadEndpoint。

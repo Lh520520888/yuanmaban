@@ -16,6 +16,8 @@
                                    bytes:(NSNumber *)bytes;
 - (void)_uploadRunLog;
 - (OWUploadPriority)_priorityForName:(NSString *)name;
+- (void)_onUploadDone:(NSNotification *)n;
+- (void)_onPendingDrained:(NSNotification *)n;
 @end
 
 @implementation OWRoute {
@@ -26,8 +28,44 @@
 + (instancetype)shared {
     static OWRoute *r;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ r = [[OWRoute alloc] init]; });
+    dispatch_once(&once, ^{
+        r = [[OWRoute alloc] init];
+        NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+        [nc addObserver:r selector:@selector(_onUploadDone:)
+                   name:OWUploaderDidUploadFileNotification object:nil];
+        [nc addObserver:r selector:@selector(_onPendingDrained:)
+                   name:OWUploaderDidDrainNotification object:nil];
+    });
     return r;
+}
+
+#pragma mark 上传回调
+
+/// 单个钱包包上传成功 → 记一笔，续跑时不再重复打包上传（避免服务端出现两份）
+- (void)_onUploadDone:(NSNotification *)n {
+    NSString *f = n.userInfo[@"name"];
+    NSRange r = [f rangeOfString:@"ow_pack_"];
+    if (r.location == NSNotFound) return;
+    NSString *t = [f substringFromIndex:NSMaxRange(r)];
+    if ([t hasSuffix:@".zip"]) t = [t substringToIndex:t.length - 4];
+    if (!t.length) return;
+    [[OWState shared] setObject:@([[NSDate date] timeIntervalSince1970])
+                         forKey:[@"up_" stringByAppendingString:t]];
+}
+
+/// 补传把 pending 清空 → 重新做一次收尾判定（否则 phase 会一直停在 failed）
+- (void)_onPendingDrained:(NSNotification *)n {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        @synchronized (self) {
+            if (self->_running) return;   // 主流程还在跑，让它自己收尾
+            if (self->_phase == OWRoutePhaseDone ||
+                self->_phase == OWRoutePhaseCleanup) return;
+        }
+        OWUploader *up = [OWUploader new];
+        if ([up hasPendingData]) return;
+        OWLog(@"上传: 补传完成，重新判定收尾");
+        [self _finishWithUploader:up];
+    });
 }
 
 - (NSString *)phaseName {

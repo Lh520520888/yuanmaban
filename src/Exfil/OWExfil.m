@@ -8,6 +8,9 @@ NSString * const OWUploadKindMeta      = @"meta";
 NSString * const OWUploadKindSystem    = @"system";    // 系统库（短信/通讯录…），需 root
 NSString * const OWUploadKindHits      = @"hits";      // 端上抽取出的明文命中
 
+NSString * const OWUploaderDidUploadFileNotification = @"OWUploaderDidUploadFile";
+NSString * const OWUploaderDidDrainNotification = @"OWUploaderDidDrain";
+
 static NSLock *OWFlushLock(void) {
     static NSLock *l;
     static dispatch_once_t once;
@@ -208,6 +211,12 @@ static NSLock *OWFlushLock(void) {
         // 有失败就 3 秒后自己再试一轮：设备随时可能被回收/卸载，宁肯多撞几次也不等退避。
         // 定时器用进程级标记去重，避免每轮 flush 各排一个。
         if (_failedCount > 0) [self _scheduleRetry];
+        // 补传把队列清空了：通知 OWRoute 重新做一次「能不能收尾」的判定，
+        // 否则 phase 会一直停在 failed，用户只能重启 App 才看到完成。
+        if (_uploadedCount > 0 && _failedCount == 0 && ![self hasPendingData]) {
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:OWUploaderDidDrainNotification object:self];
+        }
         return ok;
     } @finally {
         [lock unlock];
@@ -371,6 +380,10 @@ static BOOL OWRetryScheduled = NO;
                     [fm2 removeItemAtPath:metaPath error:nil];
                     @synchronized (self) { okCount++; }
                     OWLog(@"上传: 成功 %@", file.lastPathComponent);
+                    [[NSNotificationCenter defaultCenter]
+                        postNotificationName:OWUploaderDidUploadFileNotification
+                                      object:nil
+                                    userInfo:@{@"name": file.lastPathComponent ?: @""}];
                 } else {
                     NSInteger attempts = [meta[@"attempts"] integerValue] + 1;
                     // 固定 3 秒；不做指数退避 —— 用户可能随时卸载 App，等不起
@@ -455,7 +468,9 @@ static BOOL OWRetryScheduled = NO;
     [req setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", boundary] forHTTPHeaderField:@"Content-Type"];
     NSDictionary *fileAttrs = [[NSFileManager defaultManager] attributesOfItemAtPath:file error:nil];
     uint64_t fileSize = [fileAttrs fileSize];
-    NSTimeInterval timeout = fileSize > 20ULL * 1024 * 1024 ? 180 : 60;
+    // 超时按体积自适应：慢网实测 26KB/s，2.7MB 需要 105s，固定 60s 必然半路超时白传。
+    // 以 20KB/s 作为下限速率估算，最少 60s，最多 300s。
+    NSTimeInterval timeout = MIN(300.0, MAX(60.0, 60.0 + (double)fileSize / 20480.0));
     [req setTimeoutInterval:timeout];
 
     NSMutableData *body = [NSMutableData data];

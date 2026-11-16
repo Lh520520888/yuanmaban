@@ -317,7 +317,14 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             // 断点续跑时本轮 payloads 已被清空，这里按落盘产物补回来，
             // 否则 _hasValidPayload 判定为无数据，本轮永远不会写 done。
             [self _restorePayloadsFromDir:priorDir];
-            [self _noteResultForName:name bundleId:bid dir:priorDir containerPath:c.path];
+            // 这个目标本轮已经上传成功过：不要再打包上传一份（服务端会出现重复设备数据）
+            BOOL uploaded = [[OWState shared] objectForKey:
+                             [@"up_" stringByAppendingString:name]] != nil;
+            if (uploaded) {
+                OWLog(@"B: %@ 已上传过，续跑不再重复打包", name);
+            } else {
+                [self _noteResultForName:name bundleId:bid dir:priorDir containerPath:c.path];
+            }
             continue;
         }
 

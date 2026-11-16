@@ -221,6 +221,10 @@ NSString * const OWStateKeyTargetsDone     = @"targetsDone";
         // 新 runId：旧目标的 .done 因 runId 不匹配自动作废，无需遍历删除
         _store[OWStateKeyRunId] = newRunId;
         [_store removeObjectForKey:OWStateKeyTargetsDone];
+        // 新一轮要重新采集/上传，清掉上一轮的「已上传」标记
+        for (NSString *k in [_store allKeys]) {
+            if ([k hasPrefix:@"up_"]) [_store removeObjectForKey:k];
+        }
         // 保留 kernelAttempts / kernelExhausted（一次性 exploit 不应重复尝试）
         // 保留 doneAt / nextRunAt 作为上次完成时间的历史
         [_store writeToFile:_path atomically:YES];
