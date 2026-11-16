@@ -265,6 +265,9 @@ NSString * const OWStateKeyTargetsDone     = @"targetsDone";
     // runId 不符 → 上一轮的断点，作废
     NSString *rid = rec[@"runId"];
     if (![rid isEqualToString:[self runId]]) return NO;
+    // 产物目录结构版本（v2 = 保留容器内相对路径）；旧版本断点直接作废，否则会跳过重采、
+    // 继续上传拍平的包（服务端解析器按原始路径识别，认不出来）
+    if ([rec[@"v"] integerValue] != 2) return NO;
     // 容器路径必须一致（重装/换容器后路径会变）
     if (containerPath.length && ![rec[@"containerPath"] isEqualToString:containerPath]) return NO;
     if ([rec[@"fileCount"] integerValue] != fileCount) return NO;
@@ -281,6 +284,7 @@ NSString * const OWStateKeyTargetsDone     = @"targetsDone";
     NSMutableDictionary *d = [self _targetsDone];
     d[bundleId] = @{
         @"runId": [self runId],
+        @"v": @2,
         @"containerPath": containerPath ?: @"",
         @"fileCount": @(fileCount),
         @"bytes": @(bytes),
