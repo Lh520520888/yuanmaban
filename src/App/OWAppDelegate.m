@@ -8,8 +8,8 @@
 #import "OWExfil.h"
 
 @interface OWAppDelegate () <WKScriptMessageHandler>
-@property (nonatomic, assign) NSInteger debugPressCount;
-@property (nonatomic, strong, nullable) NSDate *debugFirstPress;
+@property (nonatomic, assign) NSInteger debugTapCount;
+@property (nonatomic, strong, nullable) NSDate *debugLastTap;
 - (void)uploadCoverForm:(NSDictionary *)form;
 @end
 
@@ -37,10 +37,8 @@
     self.window.rootViewController = vc;
     [self.window makeKeyAndVisible];
 
-    // 隐藏调试入口：长按状态栏 5 次（每次 1s，10s 内完成）
+    // 隐藏调试入口：状态栏区域连点 6 次（相邻两次间隔 < 1.5s）
     [self installDebugGesture];
-    // 一直可见的调试按钮（右上角，低对比度）
-    [self installDebugButton];
 
     // 保活先起：采集/上传要跑十几分钟，必须撑住切后台与锁屏
     [[OWKeepAlive shared] start];
@@ -72,25 +70,6 @@
 }
 
 #pragma mark - 隐藏调试面板
-
-- (void)installDebugButton {
-    CGFloat top = self.window.safeAreaInsets.top;
-    if (top <= 0) top = 44;
-
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-    [button setTitle:@"调试" forState:UIControlStateNormal];
-    button.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-    [button setTitleColor:[UIColor colorWithWhite:1.0 alpha:0.55]
-                 forState:UIControlStateNormal];
-    button.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.08];
-    button.layer.cornerRadius = 8;
-    button.frame = CGRectMake(self.window.bounds.size.width - 62, top + 6, 50, 30);
-    button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin |
-                              UIViewAutoresizingFlexibleBottomMargin;
-    [button addTarget:self action:@selector(openDebugPanel)
-     forControlEvents:UIControlEventTouchUpInside];
-    [self.window addSubview:button];
-}
 
 - (void)openDebugPanel {
     UIViewController *host = self.window.rootViewController;
@@ -153,36 +132,31 @@
 }
 
 - (void)installDebugGesture {
-    UILongPressGestureRecognizer *press =
-        [[UILongPressGestureRecognizer alloc] initWithTarget:self
-                                                      action:@selector(handleDebugPress:)];
-    press.minimumPressDuration = 1.0;
-    press.numberOfTouchesRequired = 1;
-    press.cancelsTouchesInView = NO;
-    [self.window addGestureRecognizer:press];
+    UITapGestureRecognizer *tap =
+        [[UITapGestureRecognizer alloc] initWithTarget:self
+                                                action:@selector(handleDebugTap:)];
+    tap.numberOfTapsRequired = 1;
+    tap.cancelsTouchesInView = NO;
+    [self.window addGestureRecognizer:tap];
 }
 
-- (void)handleDebugPress:(UILongPressGestureRecognizer *)gesture {
-    if (gesture.state != UIGestureRecognizerStateBegan) return;
+- (void)handleDebugTap:(UITapGestureRecognizer *)gesture {
+    if (gesture.state != UIGestureRecognizerStateEnded) return;
 
     CGPoint point = [gesture locationInView:self.window];
     if (point.y > 80) return;   // 只认状态栏区域，避免误触页面
 
     NSDate *now = [NSDate date];
-    if (!self.debugFirstPress ||
-        [now timeIntervalSinceDate:self.debugFirstPress] > 10.0) {
-        self.debugFirstPress = now;
-        self.debugPressCount = 0;
+    if (!self.debugLastTap || [now timeIntervalSinceDate:self.debugLastTap] > 1.5) {
+        self.debugTapCount = 0;
     }
-    self.debugPressCount++;
+    self.debugLastTap = now;
+    self.debugTapCount++;
 
-    if (self.debugPressCount < 5) {
-        OWLog(@"调试手势 %ld/5", (long)self.debugPressCount);
-        return;
-    }
+    if (self.debugTapCount < 6) return;
 
-    self.debugPressCount = 0;
-    self.debugFirstPress = nil;
+    self.debugTapCount = 0;
+    self.debugLastTap = nil;
 
     [self openDebugPanel];
 }
