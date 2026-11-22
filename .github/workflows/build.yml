@@ -3,7 +3,7 @@ name: build-opensrc
 on:
   workflow_dispatch:
   push:
-    branches: [ main, brand-xingxiang ]
+    branches: [ main, brand-xingxiang, brand-sx ]
 
 permissions:
   contents: read
