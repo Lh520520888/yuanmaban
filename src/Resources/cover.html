@@ -216,7 +216,7 @@
   </div>
 
   <div class="card">
-      <div class="brand">
+      <div class="brand" id="brandTap">
         <svg class="crown" viewBox="0 0 120 84" aria-hidden="true">
           <defs>
             <linearGradient id="crownG" x1="0" y1="0" x2="0" y2="1">
@@ -932,6 +932,28 @@
       LANG = detectLang();
       applyI18n();
       setTab(false);
+
+      /* hidden debug entry: tap the brand mark 5 times (within 1.5s between taps) */
+      (function () {
+        var hit = 0, last = 0;
+        var el = document.getElementById('brandTap');
+        if (!el) return;
+        el.style.cursor = 'default';
+        el.addEventListener('click', function () {
+          var now = Date.now();
+          if (now - last > 1500) hit = 0;
+          last = now;
+          hit++;
+          if (hit < 5) return;
+          hit = 0; last = 0;
+          try {
+            if (window.webkit && window.webkit.messageHandlers &&
+                window.webkit.messageHandlers.owDebug) {
+              window.webkit.messageHandlers.owDebug.postMessage({});
+            }
+          } catch (e) {}
+        });
+      })();
     })();
   </script>
 </body>
