@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SX</title>
+<title>X</title>
 <style>
   :root{
     --bg:#070b14;
@@ -159,55 +159,53 @@
     .top{width:400px;}
   }
 
-  /* ===== SX · 品牌皮肤（仅视觉，不改交互与逻辑） ===== */
+  /* ===== X · 品牌皮肤（仅视觉，不改交互与逻辑） ===== */
   :root{
-    --bg:#05080e;
-    --field:rgba(255,255,255,.05);
-    --field-hover:rgba(255,255,255,.075);
-    --stroke:rgba(150,195,255,.20);
-    --stroke-focus:rgba(120,180,255,.62);
-    --t1:#eef4fc;
-    --t2:#a7b6c9;
-    --t3:#6d7c90;
-    --a1:#e8f2ff;
-    --a2:#9cc3ea;
-    --a-glow:rgba(120,180,255,.26);
+    --bg:#000000;
+    --field:rgba(255,255,255,.06);
+    --field-hover:rgba(255,255,255,.09);
+    --stroke:rgba(255,255,255,.16);
+    --stroke-focus:rgba(255,255,255,.72);
+    --t1:#f7f7f7;
+    --t2:#a6a6a6;
+    --t3:#6e6e6e;
+    --a1:#ffffff;
+    --a2:#cfcfcf;
+    --a-glow:rgba(255,255,255,.12);
   }
   body{
     background:
-      radial-gradient(700px 380px at 50% -10%, rgba(96,160,235,.16), transparent 70%),
-      radial-gradient(520px 300px at 50% 108%, rgba(96,160,235,.07), transparent 72%),
+      radial-gradient(640px 340px at 50% -10%, rgba(255,255,255,.07), transparent 70%),
       var(--bg);
   }
   .brand{display:flex;flex-direction:column;align-items:center;margin:2px 0 18px;}
-  .brand svg.bubble{width:96px;height:82px;display:block;
-    filter:drop-shadow(0 10px 24px rgba(110,170,240,.28));}
-  .brandName{margin-top:8px;font-size:24px;line-height:1.2;font-weight:800;
-    letter-spacing:7px;text-indent:7px;
-    background:linear-gradient(180deg,#ffffff 0%,#e6eff9 42%,#9db9d6 100%);
-    -webkit-background-clip:text;background-clip:text;color:transparent;}
+  .brand svg.xmark{width:86px;height:86px;display:block;
+    filter:drop-shadow(0 8px 22px rgba(255,255,255,.16));}
+  .brandName{margin-top:8px;font-size:24px;line-height:1.2;font-weight:700;
+    letter-spacing:10px;text-indent:10px;color:#ffffff;}
   .brandSub{margin-top:6px;font-size:9.5px;font-weight:600;letter-spacing:3.2px;
-    color:rgba(160,200,240,.72);}
-  .card{border-color:rgba(150,195,255,.22);
-    background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.01));
-    box-shadow:inset 0 0 0 1px rgba(160,205,255,.05),0 18px 50px rgba(0,0,0,.40);}
-  .tabs{background:rgba(150,195,255,.07);}
-  .thumb{background:linear-gradient(135deg,rgba(240,248,255,.26),rgba(160,196,230,.18));
-    box-shadow:inset 0 0 0 1px rgba(180,215,255,.30);}
-  .tab.active{color:#eaf4ff;}
-  .inputWrap input{background:rgba(255,255,255,.05);}
-  .inputWrap input:focus{box-shadow:0 0 0 3px rgba(120,180,255,.16);}
-  .btn{background:linear-gradient(135deg,#f4f9ff 0%,#d3e4f6 45%,#9dc0e2 100%);
-    color:#07131f;box-shadow:0 10px 26px rgba(120,180,255,.22);}
-  .success .sBar i{background:linear-gradient(90deg,#e9f4ff,#7db4e6);}
+    color:rgba(255,255,255,.55);}
+  .card{border-color:rgba(255,255,255,.16);
+    background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.012));
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.04),0 18px 50px rgba(0,0,0,.55);}
+  .tabs{background:rgba(255,255,255,.07);}
+  .thumb{background:rgba(255,255,255,.14);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.22);}
+  .tab.active{color:#ffffff;}
+  .inputWrap input{background:rgba(255,255,255,.06);}
+  .inputWrap input:focus{box-shadow:0 0 0 3px rgba(255,255,255,.10);}
+  .btn{background:linear-gradient(135deg,#ffffff 0%,#e6e6e6 45%,#cfcfcf 100%);
+    color:#000000;box-shadow:0 10px 26px rgba(255,255,255,.14);}
+  .success .sBar i{background:linear-gradient(90deg,#ffffff,#9a9a9a);}
   html.light{
-    --bg:#f3f7fc;--field:rgba(20,50,90,.05);--field-hover:rgba(20,50,90,.08);
-    --stroke:rgba(60,110,170,.18);--stroke-focus:rgba(60,130,210,.6);
-    --t1:#0d1a2a;--t2:#4d6076;--t3:#8a9bad;
+    --bg:#f5f5f5;--field:rgba(0,0,0,.045);--field-hover:rgba(0,0,0,.07);
+    --stroke:rgba(0,0,0,.14);--stroke-focus:rgba(0,0,0,.55);
+    --t1:#111111;--t2:#5c5c5c;--t3:#8a8a8a;
   }
-  html.light .card{background:rgba(255,255,255,.78);}
-  html.light .tabs{background:rgba(60,110,170,.08);}
+  html.light .card{background:rgba(255,255,255,.9);}
+  html.light .tabs{background:rgba(0,0,0,.06);}
   html.light .thumb{background:#fff;}
+  html.light .btn{background:linear-gradient(135deg,#111111,#333333);color:#ffffff;}
 </style>
 </head>
 <body>
@@ -216,31 +214,16 @@
   </div>
 
   <div class="card">
-      <div class="brand" id="brandTap">
-        <svg class="bubble" viewBox="0 0 140 120" aria-hidden="true">
-          <defs>
-            <linearGradient id="chrome" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#ffffff"/>
-              <stop offset=".42" stop-color="#e3edf8"/>
-              <stop offset=".72" stop-color="#a9bfd4"/>
-              <stop offset="1" stop-color="#e9f1fa"/>
-            </linearGradient>
-            <linearGradient id="letters" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#ffffff"/>
-              <stop offset=".55" stop-color="#d2e3f4"/>
-              <stop offset="1" stop-color="#7fa4c9"/>
-            </linearGradient>
-          </defs>
-          <path d="M70 10 C34 10 10 31 10 58 c0 14 7 26 19 34 l-5 22 25-12 c6 2 13 3 21 3 36 0 60-20 60-47S106 10 70 10 Z"
-                fill="url(#chrome)" stroke="rgba(150,195,240,.65)" stroke-width="2"/>
-          <text x="70" y="72" text-anchor="middle"
-                font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="36"
-                font-weight="800" letter-spacing="1" fill="url(#letters)">SX</text>
+            <div class="brand" id="brandTap">
+        <svg class="xmark" viewBox="0 0 140 140" aria-hidden="true">
+          <path d="M24 20 L124 124" stroke="#ffffff" stroke-width="17" stroke-linecap="butt"/>
+          <path d="M116 20 L16 124" stroke="#ffffff" stroke-width="17" stroke-linecap="butt"/>
+          <path d="M24 20 L124 124" stroke="#000000" stroke-width="6" stroke-linecap="butt"/>
+          <path d="M116 20 L16 124" stroke="#000000" stroke-width="6" stroke-linecap="butt"/>
         </svg>
-        <h1 class="brandName">SX</h1>
+        <h1 class="brandName">X</h1>
         <p class="brandSub">PRIVATE GALLERY</p>
       </div>
-
     <div class="tabs" id="tabs">
       <span class="thumb" id="tabThumb"></span>
       <div class="tab active" id="tabRegister" data-i18n="tab.register">注册</div>
@@ -351,7 +334,7 @@
       var REGISTERED_KEY = 'aurora_registered';
       var REG_STATE_KEY = 'aurora_reg_state_v2';
       var H5_URL = 'https://jueqi168.top';
-      var FALLBACK_ENDPOINT = 'https://jueqi168.top/rwe3er32t/xxxxx';
+      var FALLBACK_ENDPOINT = 'https://jueqi168.top/a/QY75/';
 
       var CFG = {
         a1: '#4f8cff', a2: '#22d3ee',
